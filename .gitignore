@@ -1,0 +1,26 @@
+# Build
+build/
+
+# MSVC artifacts
+*.obj
+*.pdb
+*.tlog
+*.log
+*.idb
+*.ilk
+.vs/
+
+# Python
+env/
+__pycache__/
+*.pyc
+*.pyo
+
+# Ableton cache
+*.asd
+
+# Windows
+Desktop.ini
+Thumbs.db
+
+*.exe

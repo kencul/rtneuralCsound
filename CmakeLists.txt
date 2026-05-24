@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.15)
+project(rtneuralCsound VERSION 0.1.0)
+
+add_subdirectory(vendor/RTNeural)
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+function(add_tool target_name)
+    add_executable(${target_name} src/${target_name}/${target_name}.cpp)
+    target_include_directories(${target_name} PRIVATE ${CMAKE_SOURCE_DIR}/vendor)
+    target_link_libraries(${target_name} PRIVATE RTNeural)
+    target_compile_features(${target_name} PRIVATE cxx_std_17)
+endfunction()
+
+add_tool(process_wav)
+add_tool(process_wav_torch)
+add_tool(process_wav_torch_param)
+add_tool(process_wav_torch_param2)
