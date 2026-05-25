@@ -41,9 +41,6 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv = CausalConv1d(in_channels=1, out_channels=16, kernel_size=31)
-        self.norm = nn.LayerNorm(16)
-        # maps knob scalar to GRU initial hidden state so the model starts in the right filter mode
-        self.knob_to_h0 = nn.Sequential(nn.Linear(1, GRU_HIDDEN), nn.Tanh())
         self.gru = nn.GRU(17, GRU_HIDDEN, batch_first=True)
         self.dense = nn.Linear(GRU_HIDDEN, 1)
 
@@ -52,17 +49,13 @@ class Model(nn.Module):
         audio = x[:, :, :1]  # (batch, time, 1)
         knob  = x[:, :, 1:]  # (batch, time, 1)
 
-        audio = audio.permute(0, 2, 1)
-        audio = self.conv(audio)
-        audio = audio.permute(0, 2, 1)
-        audio = self.norm(audio)  # normalize before mixing with knob
+        conv_out = audio.permute(0, 2, 1)
+        conv_out = self.conv(conv_out)
+        conv_out = conv_out.permute(0, 2, 1)  # (batch, time, 16)
 
-        gru_input = torch.cat([audio, knob], dim=-1)  # (batch, time, 17)
-
-        # knob is constant per window - use first timestep to seed h0
-        h0 = self.knob_to_h0(knob[:, 0, :]).unsqueeze(0)  # (1, batch, 128)
-        out, _ = self.gru(gru_input, h0)
-        return self.dense(out)
+        gru_input = torch.cat([conv_out, knob], dim=-1)  # (batch, time, 17)
+        out, _ = self.gru(gru_input)
+        return self.dense(out) + audio  # skip connection: model learns residual
 
 
 window_size = 8192

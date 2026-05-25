@@ -31,6 +31,17 @@ build/bin/Release/process_wav_torch <model.json> <input.wav> <output.wav>
 build/bin/Release/process_wav_torch_param <model.json> <input.wav> <output.wav> <cutoff_hz>
 ```
 
+## Python environment
+
+```bash
+python -m venv env
+source env/Scripts/activate  # Windows; use `source env/bin/activate` on Mac/Linux
+pip install -r requirements.txt
+# download pytorch here: https://pytorch.org/get-started/locally/
+```
+
+PyTorch is installed separately due to the CUDA index URL. See [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/) for other CUDA versions.
+
 ---
 
 ## TensorFlow baseline
@@ -253,7 +264,7 @@ python python/eval_param_model.py
 
 This was the result:
 
-```
+```bash
  Freq (Hz)       ESR    ESR (dB)  Status
 ---------------------------------------------
         60    0.0015      -28.3dB  good
@@ -277,7 +288,11 @@ It seems it was bad training data. The validation data for the 16khz data has a 
 
 The issue is that the moog filter gets too unstable at 16khz. With 4 poles, the eigen value goes to 8.4 at 16khz, when the limit is around 2.8. The solution is to increase oversampling. It was at 1, so set it to 8 for maximum stability and high accuracy of the filter.
 
-This run went fantastic. The model reached 0.0000 loss by epoch 80, with the lr scheduler stepping down to 3.13e-05 over the 300 epochs.
+Trained with 128 GRU hidden units on the fixed 8x-oversampled data, cutoff range 60–20kHz. Training ran the full 300 epochs at 13.2s/epoch for 66.0 minutes.
+
+Val loss hit 0.0000 by epoch 38. The LR stepped five times: 1e-3 → 5e-4 → 2.5e-4 → 1.25e-4 → 6.25e-5 → 3.13e-5, with each step happening later and producing less improvement. This means the model was effectively solved by epoch 80 and the remainder of training was micro-refinement.
+
+Best val_loss: 0.0000.
 
 After updating `eval_param_model.py` to take the .pt file as an argument:
 
@@ -331,7 +346,7 @@ Obviously, the 16k and 20k output will be bad, but there doesn't seem to be much
 
 This disconnect between the test and the training result is mostly to do with how the eval script runs.
 
-First, there was a bug — the model was given 2048 samples of warmup where it outputs 0s, but this warmup was included in the scoring.
+First, there was a bug: the model was given 2048 samples of warmup where it outputs 0s, but this warmup was included in the scoring.
 
 This improves the score a bit:
 
@@ -418,7 +433,11 @@ Using device: cuda
 
 Comparing the spectrum of the 1000hz output is impressive as well. There is no visible error above 60hz, and the clumps of sub 60hz bright spots present in every previous model are dim spots.
 
-I then trained a model that used the 20hz training as well, as the 60-20k model didn't handle 20hz at all because of the scaling of the cutoff knob. Again it ended at 0.0000 loss, but at 1.56e-05 learning rate. I forgot to save this model unfortunately.
+I then trained a model that used the 20hz training as well, as the 60-20k model didn't handle 20hz at all because of the scaling of the cutoff knob. Training ran the full 300 epochs at 13.7s/epoch for 68.6 minutes total.
+
+Val loss hit 0.0000 by epoch 39 and stayed there. The LR scheduler stepped far more aggressively than any previous run, halving six times: 1e-3 → 5e-4 → 2.5e-4 → 1.25e-4 → 6.25e-5 → 3.13e-5 → 1.56e-5, finishing at 1.56e-05. The model kept finding marginal improvements at each step down, suggesting 128 units has significantly more capacity than the task strictly requires.
+
+Best val_loss: 0.0000.
 
 The eval script showed this:
 
@@ -456,7 +475,11 @@ Moving on, 3 points of curiosity:
 
 Tried simplifying the model first — reducing the hidden units in the GRU from 128 to 32.
 
-The training was around 20 minutes shorter at 42.6 mins. This resulted in this eval:
+The training was around 20 minutes shorter at 42.6 mins with no early stop, around 8.7s per epoch. Val_loss hit 0.0001 by epoch 43. By epoch 85, val_loss was already hitting 0.0000. The LR scheduler stayed at 1e-3 all the way to epoch 206, meaning the model kept finding marginal improvements sporadically across that entire window. Stepped to 5e-4 at epoch 206, then 2.5e-4 at epoch 277. Both steps had diminishing returns as the model was already near its floor.
+
+Best val_loss: 0.0000.
+
+This resulted in this eval:
 
 ```bash
 $ python eval_param_model.py best_model_param.pt 
@@ -582,3 +605,58 @@ What changed in the migration:
 - **CMake**: rebuilt from scratch — new project name `rtneuralCsound`, `add_tool()` function, build output to `build/bin/Release/`
 - **Reference models**: archived by version in `ref/`
 - **Build commands** in earlier diary entries reference the old RTNeural clone paths (`build/examples_out/`, `python/testSound.wav`, etc.) — they are preserved as-is for historical accuracy
+
+
+## Simplification of the model architecture
+
+From what I learned from the other repos, it seems 64 units on GRU is plenty. I will remove the knob_to_h0 initialization portion. LayerNorm is also likely safe to drop, as the knobs are scaled to 0-1 while the audio is -1-1. There isn't much normalizing to do. Conv1d is an honest improvement over the AGAM architecture that supplements the GRU's IIR memory with richer features. Dropping it would trade accuracy for minimalism that I don't need for a desktop use case.
+
+Adding in the skip connection is also worthwhile, as it adds little complexity for standard practice for virtual analog.
+
+This means my architecture is: Conv1d -> (concat knob at every step) -> GRU -> Dense -> output + skip from raw input.
+
+This architecture also has the added bonus of all the layers being natively supported by RTNeural. This has 3 advantages:
+
+1. RTneural can deserialize the model from the JSON without any custom inference code. The inference code becomes ultra lean.
+
+2. Rtneural can use a templated static graph mode where the entire network is unrolled at compile time. This means the compiler inlines everything, aggressively optimizing the code.
+
+3. RTNeural's native layers use XSIMD intrinsics.
+
+In all, RTNeural can handle this model faster and easier, meaning implementation into Csound will be easier and more performative.
+
+Now to see how well it trains and performs.
+
+Training completed in 37.8 minutes (300 epochs, no early stop), around 7.5s per epoch, slightly faster than the previous 32-unit run at 42.6 minutes, since the model has fewer parameters without `knob_to_h0` and `LayerNorm`.
+
+The LR scheduler stepped much more aggressively than previous runs. It stepped to 5e-4 at epoch 88 (vs epoch 206 last time), then to 2.5e-4 at epoch 144, then to 1.25e-4 at epoch 261, and finally to 6.25e-5 at epoch 284. This suggests the model was plateauing more frequently without the guidance that `knob_to_h0` provided. Best val_loss: 0.0000 (rounds to zero at 4 decimal places).
+
+```bash
+$ python eval_param_model.py best_model_param.pt
+Using device: cuda
+
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0101      -19.9dB  ok
+        60    0.0010      -30.2dB  good
+       100    0.0004      -34.2dB  good
+       125    0.0002      -36.5dB  good
+       250    0.0002      -37.6dB  good
+       500    0.0001      -39.0dB  good
+       800    0.0001      -41.2dB  good
+      1000    0.0001      -42.3dB  good
+      2000    0.0000      -43.7dB  good
+      4000    0.0000      -45.4dB  good
+      8000    0.0000      -44.2dB  good
+     12000    0.0000      -46.2dB  good
+     16000    0.0001      -41.6dB  good
+     20000    0.0001      -41.3dB  good
+```
+
+This is around 10dB worse than the previous best model across the board. 20Hz is borderline at -19.9dB. Everything else is technically "good" but well behind the -48 to -54dB range the previous model achieved.
+
+The culprit is almost certainly the removal of `knob_to_h0`. That layer was seeding the GRU with an explicit representation of the target filter state before processing any audio. Without it, the GRU starts cold and has to infer the correct filter mode from the knob value in the input stream over the warmup period. The more aggressive LR scheduling pattern supports this: the model was struggling harder to find its footing.
+
+The skip connection and removal of `LayerNorm` are likely minor contributors. The scale mismatch between audio and knob was not severe enough for `LayerNorm` to matter much.
+
+Conclusion: `knob_to_h0` is doing real work and should be restored. Since the Csound opcode requires custom C++ inference regardless, there is no meaningful cost to keeping it. The "fully RTNeural native" goal was a nice-to-have, not a hard requirement.
