@@ -52,12 +52,8 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv = CausalConv1d(in_channels=1, out_channels=16, kernel_size=31)
-        # knob_to_h0: maps the static cutoff knob to a GRU initial-hidden-state seed.
-        # This is the isolated variable for the ablation — no LayerNorm, 32 units, skip connection.
-        self.knob_to_h0 = nn.Sequential(
-            nn.Linear(1, GRU_HIDDEN),
-            nn.Tanh()
-        )
+        # normalizes conv features before mixing with knob scalar
+        self.norm = nn.LayerNorm(16)
         self.gru = nn.GRU(17, GRU_HIDDEN, batch_first=True)
         self.dense = nn.Linear(GRU_HIDDEN, 1)
 
@@ -69,15 +65,10 @@ class Model(nn.Module):
         conv_out = audio.permute(0, 2, 1)
         conv_out = self.conv(conv_out)
         conv_out = conv_out.permute(0, 2, 1)  # (batch, time, 16)
+        conv_out = self.norm(conv_out)
 
         gru_input = torch.cat([conv_out, knob], dim=-1)  # (batch, time, 17)
-
-        # Seed GRU initial hidden state from the knob value (constant per window)
-        knob_first = knob[:, 0, :]           # (batch, 1)
-        h0 = self.knob_to_h0(knob_first)     # (batch, GRU_HIDDEN)
-        h0 = h0.unsqueeze(0)                 # (1, batch, GRU_HIDDEN) — num_layers=1
-
-        out, _ = self.gru(gru_input, h0)
+        out, _ = self.gru(gru_input)
         return self.dense(out) + audio  # skip connection: model learns residual
 
 

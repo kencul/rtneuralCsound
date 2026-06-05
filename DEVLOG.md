@@ -674,17 +674,9 @@ The argument that "audio is -1 to 1 and knob is 0-1, so normalization isn't need
 
 ## Revised next steps
 
-### 1. Ablation study: isolate `knob_to_h0` (DONE — training kicked off 2026-06-05)
+### 1. Ablation study: isolate `knob_to_h0` and `LayerNorm` (COMPLETE)
 
-Train with `knob_to_h0` restored, `LayerNorm` still removed, skip connection still present, 32 units.
-
-- **Script modified**: `python/tensor_torch_param.py` — added `nn.Sequential(nn.Linear(1, 32), nn.Tanh())` as `self.knob_to_h0`, forward pass feeds first-timestep knob through it to seed GRU initial state
-- **Outputs**: `best_model_param_k2h0.pt`, `rtneural_model_param_k2h0_weights.json` (separate files, won't clobber existing models)
-- **Expected time**: ~35-40 minutes for 300 epochs (early stop likely)
-
-If ESR recovers to near the 32-unit-with-k2h0 baseline (~-27.5dB at 20Hz, ~-40 to -50dB elsewhere), `knob_to_h0` is confirmed as the primary factor and `LayerNorm` was incidental. If it doesn't recover, or only partially recovers, then `LayerNorm` is also important and should be added back.
-
-A follow-up ablation with `LayerNorm` but no `knob_to_h0` would fully isolate both variables, but is lower priority since the working assumption is that both help.
+Result: `knob_to_h0` contributes ~3dB, `LayerNorm` contributes ~5–7dB. Both are load-bearing. See "Adding back in knob_to_h0" section above for full analysis.
 
 ### 2. Test dynamic cutoff behavior (HIGH PRIORITY — before any Csound work)
 
@@ -711,4 +703,66 @@ The non-negotiable deliverable. Use whatever model architecture survives steps 1
 
 The 128-unit model was overkill (LR halved six times, lots of spare capacity). The 32-unit model is slightly under-provisioned at low frequencies. 64 units with `knob_to_h0` restored would likely be the sweet spot: near the accuracy of 128 units but with lower inference cost. Worth a training run after the ablation results come in.
 
-##
+## Adding back in knob_to_h0
+
+To more clearly see the effects of knob_to_h0, i did a training run with just it added back into the AGAM architecture.
+
+The run lasted 48.4 minutes, which was longer than without, as it adds a small layer that runs every forward pass. Each epoch was around 10s vs the 7.5s from last run, costing 10 extra minutes.
+
+The convergence pattern seen in the training was much less chaotic than the no-k2h0 model. Adding it back made the LR step only 3 times, starting at epochs 151, 212, and 267, all of which produced immediate and clean improvements in train and val loss. The no-k2h0 run stepped 4 times starting earlier at epoch 88, meaning the model was struggling to converge without the hidden state guidance.
+
+```bash
+$ python python/eval_param_model.py ref/09_moog_20-20k_AGAM+conv+knob_to_h0/best_model_param_k2h0.pt
+Using device: cuda
+
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0054      -22.6dB  good
+        60    0.0005      -33.4dB  good
+       100    0.0002      -37.7dB  good
+       125    0.0001      -38.6dB  good
+       250    0.0001      -41.0dB  good
+       500    0.0001      -42.6dB  good
+       800    0.0000      -43.8dB  good
+      1000    0.0000      -43.2dB  good
+      2000    0.0001      -42.4dB  good
+      4000    0.0000      -44.0dB  good
+      8000    0.0001      -42.7dB  good
+     12000    0.0001      -42.3dB  good
+     16000    0.0001      -39.6dB  good
+     20000    0.0000      -47.4dB  good
+```
+
+Comparing the three 32-unit runs side by side:
+
+| Freq | 32u + k2h0 + LN | 32u, no k2h0, no LN | 32u + k2h0, no LN (this run) |
+|------|-----------------|----------------------|-------------------------------|
+| 20Hz | -27.5dB | -19.9dB | -22.6dB |
+| 60Hz | -40.9dB | -30.2dB | -33.4dB |
+| 500Hz | -48.6dB | -39.0dB | -42.6dB |
+| 1kHz | -48.9dB | -42.3dB | -43.2dB |
+| 8kHz | -48.1dB | -44.2dB | -42.7dB |
+
+Restoring `knob_to_h0` recovered ~3dB across the board, with the largest gains at low frequencies (20–500Hz) where filter state matters most. This confirms it contributes meaningfully — but it is not the dominant factor.
+
+The more significant finding is that this run is still ~5–7dB worse than the 32-unit model that had both `knob_to_h0` and `LayerNorm`. That gap can only be attributed to `LayerNorm`. The earlier assumption that audio (-1–1) and knob (0–1) are close enough in scale to not need normalization was wrong. It's not the raw inputs that matter, it's the Conv1d output (16 channels of arbitrary statistics) that flows into the GRU alongside the knob. Those features have no guaranteed scale and clearly benefit from normalization.
+
+After joining ADC Japan 2026, I noticed many ML related talks visualized the loss val in the training with graphs as part of how their training went. To achieve this, I will make the training script save the loss values and save the values as a csv.
+
+Though it can be assumed, I will try training a model without k2h0, but with `LayerNorm`.
+
+
+
+**Ablation conclusions:**
+
+- `knob_to_h0`: ~3dB improvement, mainly at low frequencies. Confirmed contributor.
+- `LayerNorm`: ~5–7dB improvement, broad effect across all frequencies. More load-bearing than assumed.
+- Together they account for most of the gap between the simplified model and the 32-unit baseline.
+
+The RTNeural-native constraint is therefore at odds with accuracy. `LayerNorm` is not supported by RTNeural, meaning the fully-native architecture sacrifices ~5–7dB of ESR. The options going forward are:
+
+1. Accept the accuracy cost and use the native architecture for easier Csound integration.
+2. Replace `LayerNorm` with `BatchNorm` (RTNeural-compatible), accepting the train/inference behavior difference.
+3. Keep `LayerNorm` and maintain the custom C++ inference path already demonstrated in `process_wav_torch_param.cpp`.
+
+Given that the Csound opcode is the non-negotiable deliverable, option 3 is likely the most pragmatic — the custom inference path already works, and accuracy should not be traded away for an architectural constraint that was always self-imposed.
