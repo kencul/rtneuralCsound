@@ -806,3 +806,13 @@ The most likely explanation is that `LayerNorm` only helps when the GRU already 
 - The RTNeural-native constraint (which requires dropping both) costs the full ~10dB.
 
 The practical implication for the Csound implementation: the custom C++ inference path in `process_wav_torch_param.cpp` is the right approach for more accurate inference. Dropping `LayerNorm` and `knob_to_h0` for RTNeural compatibility sacrifices accuracy. The question is if the increased accuracy is worth the cost in inference time, and if it will work in real-time environments.
+
+## Next steps
+
+Two options are on the table:
+
+**Option A: Test real-time performance first.** Build a Csound opcode using the existing custom inference path (with `knob_to_h0` + `LayerNorm`) and measure whether it runs at 48kHz within a real Csound context. This is the highest-priority path because the opcode is the non-negotiable conference paper deliverable. If the custom path is fast enough, the native architecture constraint was never necessary and the architecture question is settled.
+
+**Option B: Train a 64-unit all-native model.** A 64-unit model without `knob_to_h0` or `LayerNorm` would be new data: the only all-native run so far was the 32-unit simplified model (run 08, ~-19 to -46dB). However, unit count alone cannot recover the synergistic benefit of `knob_to_h0` + `LayerNorm`, so the ceiling for a native model is likely in the -25 to -42dB range regardless of unit count. This option only becomes compelling if Option A reveals a real performance bottleneck that forces the native constraint.
+
+**Decision: pursue Option A first.** The real-time test answers a binary question — does this work or not — and directly unblocks the conference paper. Option B is speculative and lower-value until there's a concrete reason the custom path can't be used.
