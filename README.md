@@ -655,8 +655,58 @@ Using device: cuda
 
 This is around 10dB worse than the previous best model across the board. 20Hz is borderline at -19.9dB. Everything else is technically "good" but well behind the -48 to -54dB range the previous model achieved.
 
-The culprit is almost certainly the removal of `knob_to_h0`. That layer was seeding the GRU with an explicit representation of the target filter state before processing any audio. Without it, the GRU starts cold and has to infer the correct filter mode from the knob value in the input stream over the warmup period. The more aggressive LR scheduling pattern supports this: the model was struggling harder to find its footing.
+The removal of `knob_to_h0` may have played a large role in this change. That layer was seeding the GRU with an explicit representation of the target filter state before processing any audio. Without it, the GRU starts cold and has to infer the correct filter mode from the knob value in the input stream over the warmup period. The more aggressive LR scheduling pattern supports this: the model was struggling harder to find its footing.
 
 The skip connection and removal of `LayerNorm` are likely minor contributors. The scale mismatch between audio and knob was not severe enough for `LayerNorm` to matter much.
 
-Conclusion: `knob_to_h0` is doing real work and should be restored. Since the Csound opcode requires custom C++ inference regardless, there is no meaningful cost to keeping it. The "fully RTNeural native" goal was a nice-to-have, not a hard requirement.
+However, there is a methodological issue with attributing the full ~10dB regression solely to `knob_to_h0`: three things changed simultaneously in the simplification run:
+
+| Removed | Added |
+|---|---|
+| `knob_to_h0` | Skip connection |
+| `LayerNorm` | |
+| 128→32 hidden units | |
+
+Any combination of these could contribute to the lost accuracy. The 32-unit model *with* `knob_to_h0` from the earlier run already showed a ~15dB drop from the 128-unit model (e.g., 20Hz went from -36.9dB to -27.5dB). The simplified model dropped another ~6-10dB on top of that. Was it `knob_to_h0`, `LayerNorm`, or the interaction of both? You can't tell from a single compound change.
+
+The argument that "audio is -1 to 1 and knob is 0-1, so normalization isn't needed" overlooks that the *conv features* (16 channels of arbitrary statistics) are what actually flow into the GRU alongside the knob — those could benefit from normalization even if the raw inputs don't strictly need it.
+
+
+## Revised next steps
+
+### 1. Ablation study: isolate `knob_to_h0` (DONE — training kicked off 2026-06-05)
+
+Train with `knob_to_h0` restored, `LayerNorm` still removed, skip connection still present, 32 units.
+
+- **Script modified**: `python/tensor_torch_param.py` — added `nn.Sequential(nn.Linear(1, 32), nn.Tanh())` as `self.knob_to_h0`, forward pass feeds first-timestep knob through it to seed GRU initial state
+- **Outputs**: `best_model_param_k2h0.pt`, `rtneural_model_param_k2h0_weights.json` (separate files, won't clobber existing models)
+- **Expected time**: ~35-40 minutes for 300 epochs (early stop likely)
+
+If ESR recovers to near the 32-unit-with-k2h0 baseline (~-27.5dB at 20Hz, ~-40 to -50dB elsewhere), `knob_to_h0` is confirmed as the primary factor and `LayerNorm` was incidental. If it doesn't recover, or only partially recovers, then `LayerNorm` is also important and should be added back.
+
+A follow-up ablation with `LayerNorm` but no `knob_to_h0` would fully isolate both variables, but is lower priority since the working assumption is that both help.
+
+### 2. Test dynamic cutoff behavior (HIGH PRIORITY — before any Csound work)
+
+The model has only been trained and evaluated on static cutoffs. With moving parameters:
+
+- The `knob_to_h0` seeding happens only once at initialization — it was never designed for parameter changes mid-stream. What happens to the GRU state when the knob changes abruptly?
+- The 2048-sample warmup (42ms) is invisible during training loss calculation. In a Csound context, every parameter change means the model needs to "catch up" to a new filter state. Can it do that fast enough?
+- Training data with sweeps/modulation might be necessary — and if so, the whole training pipeline needs rework.
+
+**Approach**: Write a quick Python script that feeds a swept cutoff through the model, compare output against the real Moog filter on the same sweep. If it falls apart on moving parameters, the training strategy needs to change before the Csound opcode is built.
+
+Rationale for prioritizing this over the opcode: if the model can't handle dynamic cutoffs well, the Csound opcode — which exists precisely to enable real-time parameter control — won't be useful.
+
+### 3. Csound opcode (MUST-HAVE for conference paper)
+
+The non-negotiable deliverable. Use whatever model architecture survives steps 1-3. The C++ inference code in `process_wav_torch_param.cpp` already demonstrates custom layer handling — the "fully RTNeural-native" constraint was always self-imposed, not a technical limitation. The opcode needs:
+
+- Real-time audio I/O via Csound's opcode API
+- `k-rate` cutoff parameter (updates every control cycle, not every sample)
+- `a-rate` parameter would be ideal but can be a stretch goal
+- Stateful inference: GRU hidden state persists across `ksmps`-sized blocks so the filter doesn't reset
+
+### 4. Architecture sweet spot: try 64 units
+
+The 128-unit model was overkill (LR halved six times, lots of spare capacity). The 32-unit model is slightly under-provisioned at low frequencies. 64 units with `knob_to_h0` restored would likely be the sweet spot: near the accuracy of 128 units but with lower inference cost. Worth a training run after the ablation results come in.

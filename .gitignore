@@ -26,3 +26,5 @@ Thumbs.db
 *.exe
 
 audio/filteredOutput/
+
+.claude/

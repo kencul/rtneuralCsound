@@ -41,6 +41,12 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv = CausalConv1d(in_channels=1, out_channels=16, kernel_size=31)
+        # knob_to_h0: maps the static cutoff knob to a GRU initial-hidden-state seed.
+        # This is the isolated variable for the ablation — no LayerNorm, 32 units, skip connection.
+        self.knob_to_h0 = nn.Sequential(
+            nn.Linear(1, GRU_HIDDEN),
+            nn.Tanh()
+        )
         self.gru = nn.GRU(17, GRU_HIDDEN, batch_first=True)
         self.dense = nn.Linear(GRU_HIDDEN, 1)
 
@@ -54,7 +60,13 @@ class Model(nn.Module):
         conv_out = conv_out.permute(0, 2, 1)  # (batch, time, 16)
 
         gru_input = torch.cat([conv_out, knob], dim=-1)  # (batch, time, 17)
-        out, _ = self.gru(gru_input)
+
+        # Seed GRU initial hidden state from the knob value (constant per window)
+        knob_first = knob[:, 0, :]           # (batch, 1)
+        h0 = self.knob_to_h0(knob_first)     # (batch, GRU_HIDDEN)
+        h0 = h0.unsqueeze(0)                 # (1, batch, GRU_HIDDEN) — num_layers=1
+
+        out, _ = self.gru(gru_input, h0)
         return self.dense(out) + audio  # skip connection: model learns residual
 
 
@@ -174,7 +186,7 @@ for epoch in range(epochs):
     if val_loss < best_val_loss:
         best_val_loss = val_loss
         epochs_without_improvement = 0
-        torch.save(model.state_dict(), 'best_model_param.pt')
+        torch.save(model.state_dict(), 'best_model_param_k2h0.pt')
     else:
         epochs_without_improvement += 1
 
@@ -189,9 +201,9 @@ for epoch in range(epochs):
 total_time = time.time() - train_start
 print(f"Training complete in {total_time/60:.1f}m ({total_time:.0f}s)")
 print(f"Best val_loss: {best_val_loss:.4f} — loading best weights for export")
-model.load_state_dict(torch.load('best_model_param.pt'))
+model.load_state_dict(torch.load('best_model_param_k2h0.pt'))
 
-with open('rtneural_model_param_weights.json', 'w') as f:
+with open('rtneural_model_param_k2h0_weights.json', 'w') as f:
     json.dump(model.state_dict(), f, cls=EncodeTensor, indent=4)
 
-print("Model saved to rtneural_model_param_weights.json")
+print("Model saved to rtneural_model_param_k2h0_weights.json")
