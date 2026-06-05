@@ -747,22 +747,62 @@ Restoring `knob_to_h0` recovered ~3dB across the board, with the largest gains a
 
 The more significant finding is that this run is still ~5–7dB worse than the 32-unit model that had both `knob_to_h0` and `LayerNorm`. That gap can only be attributed to `LayerNorm`. The earlier assumption that audio (-1–1) and knob (0–1) are close enough in scale to not need normalization was wrong. It's not the raw inputs that matter, it's the Conv1d output (16 channels of arbitrary statistics) that flows into the GRU alongside the knob. Those features have no guaranteed scale and clearly benefit from normalization.
 
-After joining ADC Japan 2026, I noticed many ML related talks visualized the loss val in the training with graphs as part of how their training went. To achieve this, I will make the training script save the loss values and save the values as a csv.
+After joining ADC Japan 2026, I noticed many ML related talks visualized the loss val in the training with graphs as part of how their training went. To achieve this, I made the training script save the loss values as a CSV, and updated it to take an output directory as a CLI argument so all artifacts land in a versioned `ref/` folder automatically.
 
-Though it can be assumed, I will try training a model without k2h0, but with `LayerNorm`.
+## Ablation: LayerNorm only, no knob_to_h0
 
+To complete the ablation, ran a model with `LayerNorm` restored but `knob_to_h0` still removed. Architecture: `Conv1d → LayerNorm → (concat knob) → GRU → Dense + skip`.
 
+Training ran the full 300 epochs in 42.6 minutes (~8.5s/epoch). The LR stepped 4 times: 1e-3 → 5e-4 at epoch 137, → 2.5e-4 at epoch 196, → 1.25e-4 at epoch 248, → 6.25e-5 at epoch 274. More steps than the k2h0-only run (3 steps) but with a later first step than the no-component run (epoch 88), suggesting `LayerNorm` provides some stabilization but less than `knob_to_h0`. Val loss was noticeably noisier at LR 1e-3 than the k2h0 run, with several large spikes (e.g. 0.0424 at epoch 26). Best val_loss: 0.0001.
 
-**Ablation conclusions:**
+```bash
+$ python python/eval_param_model.py ref/10_moog_20-20k_AGAM+conv+LN/best_model.pt
+Using device: cuda
 
-- `knob_to_h0`: ~3dB improvement, mainly at low frequencies. Confirmed contributor.
-- `LayerNorm`: ~5–7dB improvement, broad effect across all frequencies. More load-bearing than assumed.
-- Together they account for most of the gap between the simplified model and the 32-unit baseline.
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0115      -19.4dB  ok
+        60    0.0009      -30.6dB  good
+       100    0.0002      -36.8dB  good
+       125    0.0002      -37.1dB  good
+       250    0.0002      -37.3dB  good
+       500    0.0002      -37.8dB  good
+       800    0.0001      -39.1dB  good
+      1000    0.0001      -40.0dB  good
+      2000    0.0001      -41.6dB  good
+      4000    0.0000      -45.8dB  good
+      8000    0.0001      -41.6dB  good
+     12000    0.0001      -39.6dB  good
+     16000    0.0000      -46.2dB  good
+     20000    0.0001      -41.2dB  good
+```
 
-The RTNeural-native constraint is therefore at odds with accuracy. `LayerNorm` is not supported by RTNeural, meaning the fully-native architecture sacrifices ~5–7dB of ESR. The options going forward are:
+## Full ablation results
 
-1. Accept the accuracy cost and use the native architecture for easier Csound integration.
-2. Replace `LayerNorm` with `BatchNorm` (RTNeural-compatible), accepting the train/inference behavior difference.
-3. Keep `LayerNorm` and maintain the custom C++ inference path already demonstrated in `process_wav_torch_param.cpp`.
+All four 32-unit variants:
 
-Given that the Csound opcode is the non-negotiable deliverable, option 3 is likely the most pragmatic — the custom inference path already works, and accuracy should not be traded away for an architectural constraint that was always self-imposed.
+| Freq | 32u + k2h0 + LN | 32u no k2h0 no LN | 32u + k2h0, no LN | 32u + LN, no k2h0 |
+|------|-----------------|-------------------|-------------------|--------------------|
+| 20Hz | -27.5dB | -19.9dB | -22.6dB | -19.4dB |
+| 60Hz | -40.9dB | -30.2dB | -33.4dB | -30.6dB |
+| 500Hz | -48.6dB | -39.0dB | -42.6dB | -37.8dB |
+| 1kHz | -48.9dB | -42.3dB | -43.2dB | -40.0dB |
+| 8kHz | -48.1dB | -44.2dB | -42.7dB | -41.6dB |
+
+**The LN-only result is the key finding.** It performs roughly the same as the no-component baseline, marginally better at some mid-high frequencies, slightly worse at 20Hz. `LayerNorm` alone contributes almost nothing.
+
+This overturns the earlier assumption that `LayerNorm` was contributing ~5–7dB independently. The previous conclusion was based on the gap between the k2h0-only run and the both-components baseline, and incorrectly attributed that entire gap to `LayerNorm`. What's actually happening is that `knob_to_h0` and `LayerNorm` are **synergistic**, not additive:
+
+- `knob_to_h0` alone: ~3dB improvement, mainly at low frequencies
+- `LayerNorm` alone: negligible, roughly the same as no components
+- Both together: ~10dB improvement over no components
+
+The most likely explanation is that `LayerNorm` only helps when the GRU already starts in a meaningful state. With `knob_to_h0` seeding the hidden state to match the target cutoff, the GRU has prior knowledge of what filter behavior to expect. `LayerNorm` then makes the conv feature distribution consistent across cutoffs and audio content, amplifying that prior knowledge. Without `knob_to_h0`, the GRU starts cold regardless and the normalized inputs don't give it any additional signal about which filter mode to operate in.
+
+**Revised ablation conclusions:**
+
+- `knob_to_h0` is the primary driver of accuracy, particularly at low frequencies where filter state initialization matters most.
+- `LayerNorm` is only beneficial in combination with `knob_to_h0`. Standalone it is ineffective.
+- The RTNeural-native constraint (which requires dropping both) costs the full ~10dB.
+
+The practical implication for the Csound implementation: the custom C++ inference path in `process_wav_torch_param.cpp` is the right approach for more accurate inference. Dropping `LayerNorm` and `knob_to_h0` for RTNeural compatibility sacrifices accuracy. The question is if the increased accuracy is worth the cost in inference time, and if it will work in real-time environments.

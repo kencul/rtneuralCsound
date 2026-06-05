@@ -28,3 +28,6 @@ Thumbs.db
 audio/filteredOutput/
 
 .claude/
+
+# present from another branch, not tracked here
+vendor/csound/
