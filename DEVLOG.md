@@ -710,3 +710,5 @@ The non-negotiable deliverable. Use whatever model architecture survives steps 1
 ### 4. Architecture sweet spot: try 64 units
 
 The 128-unit model was overkill (LR halved six times, lots of spare capacity). The 32-unit model is slightly under-provisioned at low frequencies. 64 units with `knob_to_h0` restored would likely be the sweet spot: near the accuracy of 128 units but with lower inference cost. Worth a training run after the ablation results come in.
+
+##

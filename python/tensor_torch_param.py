@@ -3,9 +3,20 @@ import torch.nn as nn
 import numpy as np
 import librosa
 import json
+import csv
 import time
+import sys
+import os
 from json import JSONEncoder
 from torch.utils.data import DataLoader, TensorDataset
+
+if len(sys.argv) != 2:
+    print(f"Usage: {sys.argv[0]} <output_dir>")
+    print(f"  e.g. {sys.argv[0]} ref/09_moog_20-20k_32u_k2h0_skip")
+    sys.exit(1)
+
+OUT_DIR = sys.argv[1]
+os.makedirs(OUT_DIR, exist_ok=True)
 
 FREQ_MIN = 20.0
 FREQ_MAX = 20000.0
@@ -158,6 +169,8 @@ best_val_loss = float('inf')
 early_stop_patience = 40
 epochs_without_improvement = 0
 epochs = 300
+train_losses = []
+val_losses   = []
 train_start = time.time()
 for epoch in range(epochs):
     epoch_start = time.time()
@@ -186,9 +199,12 @@ for epoch in range(epochs):
     if val_loss < best_val_loss:
         best_val_loss = val_loss
         epochs_without_improvement = 0
-        torch.save(model.state_dict(), 'best_model_param_k2h0.pt')
+        torch.save(model.state_dict(), os.path.join(OUT_DIR, 'best_model.pt'))
     else:
         epochs_without_improvement += 1
+
+    train_losses.append(train_loss)
+    val_losses.append(val_loss)
 
     lr = optimizer.param_groups[0]['lr']
     epoch_time = time.time() - epoch_start
@@ -201,9 +217,17 @@ for epoch in range(epochs):
 total_time = time.time() - train_start
 print(f"Training complete in {total_time/60:.1f}m ({total_time:.0f}s)")
 print(f"Best val_loss: {best_val_loss:.4f} — loading best weights for export")
-model.load_state_dict(torch.load('best_model_param_k2h0.pt'))
+model.load_state_dict(torch.load(os.path.join(OUT_DIR, 'best_model.pt')))
 
-with open('rtneural_model_param_k2h0_weights.json', 'w') as f:
+weights_path = os.path.join(OUT_DIR, 'weights.json')
+with open(weights_path, 'w') as f:
     json.dump(model.state_dict(), f, cls=EncodeTensor, indent=4)
+print(f"Model saved to {weights_path}")
 
-print("Model saved to rtneural_model_param_k2h0_weights.json")
+csv_path = os.path.join(OUT_DIR, 'loss_history.csv')
+with open(csv_path, 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(['epoch', 'train_loss', 'val_loss'])
+    for i, (t, v) in enumerate(zip(train_losses, val_losses), 1):
+        writer.writerow([i, t, v])
+print(f"Loss history saved to {csv_path}")
