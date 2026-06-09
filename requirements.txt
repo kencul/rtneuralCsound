@@ -1,0 +1,4 @@
+# PyTorch must be installed separately with the CUDA. Ref: https://pytorch.org/get-started/locally/
+
+numpy
+librosa
