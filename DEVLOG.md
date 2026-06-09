@@ -816,3 +816,64 @@ Two options are on the table:
 **Option B: Train a 64-unit all-native model.** A 64-unit model without `knob_to_h0` or `LayerNorm` would be new data: the only all-native run so far was the 32-unit simplified model (run 08, ~-19 to -46dB). However, unit count alone cannot recover the synergistic benefit of `knob_to_h0` + `LayerNorm`, so the ceiling for a native model is likely in the -25 to -42dB range regardless of unit count. This option only becomes compelling if Option A reveals a real performance bottleneck that forces the native constraint.
 
 **Decision: pursue Option A first.** The real-time test answers a binary question — does this work or not — and directly unblocks the conference paper. Option B is speculative and lower-value until there's a concrete reason the custom path can't be used.
+
+Option B was also run overnight as run 11. See "Run 11: 64-unit all-native model" below.
+
+## Run 11: 64-unit all-native model
+
+Trained a 64-unit `Conv1d → GRU → Dense + skip` model (no `knob_to_h0`, no `LayerNorm`) to get a concrete data point on whether unit count alone can close the accuracy gap left by dropping both components.
+
+Training ran the full 300 epochs without triggering early stopping, indicating the model continued making incremental progress through the end. Three distinct convergence phases visible in the loss history:
+
+- Epochs 1–10: large initial drop, val loss 0.319 → 0.017
+- Epochs 81–82: second sharp drop into the 8e-05 range
+- Epochs 117–139: third drop settling around 2e-05
+- Epochs 227+: final plateau at ~1.3–1.7e-05
+
+Best val_loss: ~1.29e-05 (epoch 291), approximately **-48.9 dB ESR**.
+
+```bash
+$ python python/eval_param_model.py ref/11_moog_20-20k_AGAM+conv_64u/best_model.pt
+Using device: cuda
+
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0032      -24.9dB  good
+        60    0.0003      -35.0dB  good
+       100    0.0001      -38.6dB  good
+       125    0.0001      -39.6dB  good
+       250    0.0001      -41.3dB  good
+       500    0.0001      -42.8dB  good
+       800    0.0000      -43.3dB  good
+      1000    0.0000      -43.2dB  good
+      2000    0.0000      -43.8dB  good
+      4000    0.0001      -43.0dB  good
+      8000    0.0000      -43.9dB  good
+     12000    0.0000      -44.9dB  good
+     16000    0.0000      -45.0dB  good
+     20000    0.0000      -46.5dB  good
+```
+
+All 14 frequencies rated "good". Comparing against the 32-unit all-native baseline (run 08):
+
+| Freq | 32u no k2h0 no LN | 64u no k2h0 no LN |
+|------|-------------------|-------------------|
+| 20Hz | -19.9dB | -24.9dB |
+| 60Hz | -30.2dB | -35.0dB |
+| 500Hz | -39.0dB | -42.8dB |
+| 1kHz | -42.3dB | -43.2dB |
+| 8kHz | -44.2dB | -43.9dB |
+
+Doubling units recovered ~5dB at low frequencies, ~3-4dB at mid, and made essentially no difference at high frequencies where the 32-unit model was already accurate. Critically, 20Hz improved from "ok" (-19.9dB, borderline) to "good" (-24.9dB), which is a meaningful practical improvement.
+
+**Extended ablation table** (all 32-unit variants + 64-unit native):
+
+| Freq | 32u + k2h0 + LN | 32u + k2h0, no LN | 32u + LN, no k2h0 | 32u no k2h0 no LN | 64u no k2h0 no LN |
+|------|-----------------|-------------------|-------------------|--------------------|-------------------|
+| 20Hz | -27.5dB | -22.6dB | -19.4dB | -19.9dB | **-24.9dB** |
+| 60Hz | -40.9dB | -33.4dB | -30.6dB | -30.2dB | **-35.0dB** |
+| 500Hz | -48.6dB | -42.6dB | -37.8dB | -39.0dB | **-42.8dB** |
+| 1kHz | -48.9dB | -43.2dB | -40.0dB | -42.3dB | **-43.2dB** |
+| 8kHz | -48.1dB | -42.7dB | -41.6dB | -44.2dB | **-43.9dB** |
+
+The 64-unit all-native model sits roughly on par with the 32-unit `k2h0`-only run at most frequencies, and slightly ahead at mid-high. It does not match the 32-unit `k2h0 + LN` baseline at low frequencies (5–7dB gap at 20-60Hz remains), confirming that unit count alone cannot recover the synergistic effect of both components. However, as the best fully RTNeural-native option, it is a viable deployment target if real-time performance testing rules out the custom inference path.

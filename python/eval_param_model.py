@@ -10,7 +10,7 @@ if len(sys.argv) != 2:
 
 FREQ_MIN = 20.0
 FREQ_MAX = 20000.0
-GRU_HIDDEN = 32
+GRU_HIDDEN = 64
 
 CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
 
@@ -39,7 +39,6 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv = CausalConv1d(in_channels=1, out_channels=16, kernel_size=31)
-        self.norm = nn.LayerNorm(16)
         self.gru = nn.GRU(17, GRU_HIDDEN, batch_first=True)
         self.dense = nn.Linear(GRU_HIDDEN, 1)
 
@@ -50,7 +49,6 @@ class Model(nn.Module):
         conv_out = audio.permute(0, 2, 1)
         conv_out = self.conv(conv_out)
         conv_out = conv_out.permute(0, 2, 1)  # (batch, time, 16)
-        conv_out = self.norm(conv_out)
 
         gru_input = torch.cat([conv_out, knob], dim=-1)
         out, h_out = self.gru(gru_input, h)
