@@ -903,3 +903,47 @@ First add csound as a submodule:
 git submodule add https://github.com/csound/csound vendor/csound
 ```
 
+Added Csound as a submodule and started wiring up the build. The plan is to build a `.dll` plugin that Csound loads at runtime, using the CPOF (C++ Plugin Opcode Framework) which lives in `vendor/csound/include/plugin.h` and `modload.h`. The framework is header-only, so no need to actually build Csound. Just include the headers and let Csound's installed binary load the plugin at runtime.
+
+First problem: Csound's headers depend on two generated files, `float-version.h` and `version.h`, that are normally produced by Csound's own CMake configure step. They're both `.h.in` templates in `vendor/csound/include/`. Rather than running Csound's full CMake build (which pulls in a ton of dependencies), I added two `configure_file` calls to my own root `CMakeLists.txt`. `float-version.h` just sets `USE_DOUBLE` (standard double-precision Csound), and `version.h` fills in the version numbers (7.0.0 from Csound's CMakeLists). Both get generated into `vendor/csound/include/` at configure time.
+
+Also found that the root CMakeLists had two broken targets left over from the migration: `add_tool(process_wav_torch_param)` was looking for a file named `process_wav_torch_param.cpp` but the actual file was `process_wav_torch_param2.cpp`, and `add_tool(process_wav_torch_param2)` pointed at a directory that doesn't exist. Renamed the source file to drop the "2" and removed the dead target, so `add_tool(process_wav_torch_param)` works cleanly again.
+
+Wrote the initial passthrough opcode in `src/csound_opcode/moognn.cpp`. The CPOF API is cleaner than I expected: inherit from `csnd::Plugin<nout, nin>`, implement `init()` and `aperf()`, register with `csnd::plugin<>()` in `on_load()`. The `sa_offset()` call happens automatically before `aperf()`, zeroing the offset/early regions of the output buffer for sample-accurate event scheduling. So the actual passthrough body is just a `std::copy` from input to output over `[offset, nsmps)`.
+
+Added the `moognn` shared library target to CMakeLists with `PREFIX ""` so the output is `moognn.dll` not `libmoognn.dll` (Csound expects no prefix on Windows). Built successfully:
+
+```
+moognn.vcxproj -> build\bin\Release\moognn.dll
+```
+
+Wrote `test_passthrough.csd` using `--opcode-lib=build/bin/Release/moognn.dll` to load the plugin directly. Running it gave:
+
+```
+Loading command-line libraries:
+  build/bin/Release/moognn.dll
+error:  Unable to find opcode with name: moognn
+```
+
+The DLL loaded, as the C exports `csoundModuleCreate`/`Init`/`Destroy` were found and called, but the opcode never registered. The cause was a header mismatch: the vendor `csound` submodule is at commit `1a99bfddf` (a development snapshot labeled `6.17.0-3673`), while the installed Csound binary is the actual 7.0 release. These two versions have a different internal `CSOUND` struct layout. The struct is a large table of function pointers, including `AppendOpcode`, which is how `csnd::plugin<>()` registers opcodes at runtime. Compiling against the pre-7.0 headers put `AppendOpcode` at the wrong offset, so the call silently hit garbage and the opcode was never registered.
+
+Fix: point the `moognn` build target at the installed Csound 7.0 headers (`C:/Program Files/Csound7/include/csound/`) instead of the vendor submodule. These headers already have `float-version.h` and `version.h` generated, so the `configure_file` steps were removed. The `CSOUND_INCLUDE_DIR` CMake cache variable defaults to the installed path but can be overridden. The vendor submodule stays for reading the Csound source, but cannot be used as the compile target.
+
+Rebuilt against the correct headers and the DLL is ready to test.
+
+Build the opcode DLL:
+
+```bash
+cmake -Bbuild
+cmake --build build --config Release --target moognn
+# output: build/bin/Release/moognn.dll
+```
+
+Test with the passthrough `.csd`:
+
+```bash
+csound test_passthrough.csd
+```
+
+The `.csd` uses `--opcode-lib=build/bin/Release/moognn.dll` to load the plugin directly without needing to install it or set `OPCODE6DIR64`. To install permanently, copy `moognn.dll` to `C:/Program Files/Csound7/plugins64/`.
+
