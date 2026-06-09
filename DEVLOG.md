@@ -947,3 +947,38 @@ csound test_passthrough.csd
 
 The `.csd` uses `--opcode-lib=build/bin/Release/moognn.dll` to load the plugin directly without needing to install it or set `OPCODE6DIR64`. To install permanently, copy `moognn.dll` to `C:/Program Files/Csound7/plugins64/`.
 
+## RTNeural inference in the opcode
+
+With the plugin pipeline confirmed working, replaced the passthrough with real RTNeural inference using the 64-unit all-native model (run 11).
+
+The model types mirror the architecture exactly: compile-time template parameters, same as in `process_wav_torch_param.cpp`, but 64 units and no `LayerNorm` or `knob_to_h0`:
+
+```cpp
+using ConvStage = RTNeural::ModelT<float, 1, 16,
+    RTNeural::Conv1DT<float, 1, 16, 31, 1>>;
+
+using RecurrentStage = RTNeural::ModelT<float, 17, 1,
+    RTNeural::GRULayerT<float, 17, 64>,
+    RTNeural::DenseT<float, 64, 1>>;
+```
+
+The opcode signature changed from `"ak"` to `"aSk"`: audio in, string model path, k-rate cutoff. In CPOF's `Param<>`, string args are stored as `STRINGDAT*` behind the `MYFLT*` pointer, so they're accessed via a cast: `(STRINGDAT*)inargs.begin()[1]`. Weights are loaded in `init()` using `torch_helpers`, same key prefixes as the training script (`"conv.conv."`, `"gru."`, `"dense."`). The model is heap-allocated with `new`/`delete` (freed in `deinit()`) to avoid stack overflow from Eigen's fixed-size matrices.
+
+The `aperf()` loop runs per-sample inference over `[offset, nsmps)`: forward through conv, concat the normalized knob as the 17th feature, forward through GRU+Dense, then add the raw audio as the skip connection.
+
+Hit one build error: including Csound headers before RTNeural caused macro collisions. Csound's C API defines macros that trample C++ reserved words, breaking `<chrono>` when Eigen/RTNeural pulls it in. Fix: include RTNeural and all standard library headers before the Csound headers.
+
+Built successfully. Updated `test_passthrough.csd` to pass the model path and a `linseg` cutoff sweep (50Hz → 5kHz → 50Hz over 5 seconds) to test both inference and real-time parameter control in one pass:
+
+```csound
+ain   diskin "audio/bench_mono.wav", 1
+klin = linseg:k(50, 2.5, 5000, 2.5, 50)
+aout  moognn ain, "ref/11_moog_20-20k_AGAM+conv_64u/weights.json", klin
+      out aout
+```
+
+Test output sounds good so far:
+
+```bash
+csound test_passthrough.csd
+```
