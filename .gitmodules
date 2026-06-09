@@ -1,3 +1,6 @@
 [submodule "vendor/RTNeural"]
 	path = vendor/RTNeural
 	url = https://github.com/jatinchowdhury18/RTNeural.git
+[submodule "vendor/csound"]
+	path = vendor/csound
+	url = https://github.com/csound/csound

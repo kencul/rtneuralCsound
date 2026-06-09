@@ -877,3 +877,29 @@ Doubling units recovered ~5dB at low frequencies, ~3-4dB at mid, and made essent
 | 8kHz | -48.1dB | -42.7dB | -41.6dB | -44.2dB | **-43.9dB** |
 
 The 64-unit all-native model sits roughly on par with the 32-unit `k2h0`-only run at most frequencies, and slightly ahead at mid-high. It does not match the 32-unit `k2h0 + LN` baseline at low frequencies (5–7dB gap at 20-60Hz remains), confirming that unit count alone cannot recover the synergistic effect of both components. However, as the best fully RTNeural-native option, it is a viable deployment target if real-time performance testing rules out the custom inference path.
+
+## Csound Opcode
+
+Given that the Csound opcode is the non-negotiable deliverable, option 3 is likely the most pragmatic — the custom inference path already works, and accuracy should not be traded away for an architectural constraint that was always self-imposed.
+
+Writing a Csound opcode can be done as a plugin. This would allow me to use C++ to write the opcode while using just the Csound header. This approach has the advantage that I only need to include the `include/` folder of the Csound repo. This means the entire Csound repo exists here, but the headers are used to build my opcode plugin and nothing else.
+
+Apparently, making a Csound opcode doesn't use a `.lib` file, but a big struct called `CSOUND` which contains funciton pointers for everythin I need for a plugin. I should also keep in mind this struct changes between windows and linux/mac for future compatibility issues.
+
+Here is what I need to do to get a working opcode:
+
+- Decide on and train final native-architecture model (Conv1d → concat knob → GRU → Dense + skip, no LayerNorm, no knob_to_h0) — pick unit count (32 or 64)
+- Add csound repo as git submodule at vendor/csound/
+- Update CMakeLists.txt: add opcode MODULE target alongside existing tool targets
+- Write src/rtneural_opcode.cpp: load JSON via parseJson<float>, stateful GRU inference across ksmps blocks, k-rate cutoff parameter
+- Write test/test.csd and place model JSON in test/models/
+- Build opcode DLL and verify it loads and processes audio correctly in Csound
+
+In terms of the final model format, I will be using full native layers with 64 units. TBD
+
+First add csound as a submodule:
+
+```bash
+git submodule add https://github.com/csound/csound vendor/csound
+```
+
