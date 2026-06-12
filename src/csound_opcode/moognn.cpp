@@ -37,7 +37,7 @@ struct Model {
 // so we load weights fresh from in-memory JSON per voice instead.
 static std::unordered_map<std::string, nlohmann::json> g_json_cache;
 
-static constexpr uint32_t FADE_SAMPLES = 1024;
+static constexpr uint32_t FADE_SAMPLES = 512;
 
 // moognn aout, ain, Spath, kcutoff
 struct MoogNN : csnd::Plugin<1, 3> {

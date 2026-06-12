@@ -1088,6 +1088,8 @@ model = new Model();
 // load weights from in-memory JSON as normal
 ```
 
+Eventually, the model json can be fully embedded into the plugin, but it can be loaded like this for dev purposes.
+
 ## Fixing the note-on click properly
 
 With the dropout fix in place, the clicking at note-on came back. The original silence pre-warm was removed and replaced with caching, which masked the issue. Time to understand it properly.
@@ -1116,3 +1118,128 @@ if (fade_counter < FADE_SAMPLES) fade_counter++;
 ```
 
 The fade is linear over 42ms. With a 10ms attack envelope on the oscillator input, the combined effect is a gentle ramp that covers the full GRU convergence window without sounding like a slow attack on normal playing.
+
+42ms is too long to be practical without an ADSR. The goal is to get the fade short enough that the opcode can be used as a raw filter with no envelope and no audible click on note-on.
+
+Two experiments are worth running to get there.
+
+**Experiment 1: shorter warmup in training**
+
+The `warmup_size = 2048` in `tensor_torch_param.py` defines the requirement: be accurate after X samples from a cold start. Reducing it forces the model to converge faster, because the loss kicks in sooner.
+
+Try 512 first, then 256. If the retrained model is click-free at those fade lengths in the opcode, the problem is solved without touching the architecture. This is the lowest-risk experiment and should be run first.
+
+There is no hard minimum floor from the conv1d. Looking at the training script, `CausalConv1d.forward()` zero-pads every window on the left by `kernel_size - 1 = 30` samples before applying the convolution. This means every training window starts with a zero-filled kernel buffer, which is exactly the same state as a freshly reset `Conv1DT` in RTNeural at note-on. The model has seen this condition for every window across the entire training run. The conv1d empty buffer at note-on is not a special edge case and is not contributing to the click. The warmup length is purely a GRU convergence problem.
+
+**Experiment 2: remove conv1d**
+
+No data exists in this project on a conv1d vs no-conv1d comparison. The decision to keep it was reasoned, not measured. This experiment is worth running to measure the accuracy difference, but removing conv1d will not help with warmup length since the conv buffer state at note-on already matches training exactly. The only motivation here is accuracy vs complexity, not cold-start behavior.
+
+This experiment only makes sense if experiment 1 shows the architecture can't converge fast enough. The accuracy hit might not be worth it.
+
+**What neither experiment addresses**
+
+Without `knob_to_h0`, the GRU has no prior knowledge of the target filter state at note-on. It has to infer the correct filter mode from the knob value embedded in the audio stream over time. That inference cost is the fundamental cause of the long warmup, and it doesn't go away by shortening the training warmup or removing conv1d. Those just force the model to learn to converge faster, not to start in the right state.
+
+The C++ processing script (`process_wav_torch_param.cpp`) demonstrates the solved case: `prepareModel()` seeds the GRU from `knob_to_h0` and needs zero warmup. The devlog ablation shows `knob_to_h0` contributes about 3dB of accuracy and provides much cleaner convergence behavior.
+
+If both experiments fail to get below a practical warmup length, adding `knob_to_h0` back into the opcode is the right call. The custom inference path already exists in `process_wav_torch_param.cpp` and the architecture exists in the ref models. For the paper this is also the more interesting result. It directly validates the architectural decision from the ablation study with a real-world consequence.
+
+## Training with 512 sample warmup
+
+Training script already has a `warmup_size` var. Changing it then running the training is all that's needed to do this experiment.
+
+Also added a tee in the script so all console output is automatically saved to `training.log` in the output dir.
+
+Run 12: `warmup_size = 512`, same 64-unit architecture as run 11. Training ran 275 epochs (early stopped), 36.6 minutes. LR stepped 5 times: 1e-3 at start, then 5e-4 at epoch 116, 2.5e-4 at epoch 186, 1.25e-4 at epoch 209, 6.25e-5 at epoch 233, 3.13e-5 at epoch 256. Solid convergence, no major spikes.
+
+```
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0123      -19.1dB  ok
+        60    0.0003      -34.8dB  good
+       100    0.0003      -35.4dB  good
+       125    0.0003      -35.5dB  good
+       250    0.0001      -38.9dB  good
+       500    0.0000      -43.2dB  good
+       800    0.0000      -45.7dB  good
+      1000    0.0000      -46.5dB  good
+      2000    0.0000      -47.4dB  good
+      4000    0.0000      -46.1dB  good
+      8000    0.0000      -45.8dB  good
+     12000    0.0000      -47.1dB  good
+     16000    0.0000      -47.3dB  good
+     20000    0.0000      -46.3dB  good
+```
+
+Comparing against run 11 (same architecture, warmup 2048):
+
+| Freq | Run 11 (warmup 2048) | Run 12 (warmup 512) |
+|------|---------------------|---------------------|
+| 20Hz | -24.9dB | -19.1dB |
+| 60Hz | -35.0dB | -34.8dB |
+| 250Hz | -41.3dB | -38.9dB |
+| 500Hz | -42.8dB | -43.2dB |
+| 1kHz | -43.2dB | -46.5dB |
+| 8kHz | -43.9dB | -45.8dB |
+| 20kHz | -46.5dB | -46.3dB |
+
+The tradeoff is exactly what you'd expect. 20Hz dropped about 6dB and is now borderline "ok", and 60-250Hz lost a few dB. From 500Hz up, run 12 is actually slightly better than run 11. The shorter warmup forced the GRU to converge faster, and that learned behavior is stronger in the mid-high range where filter state history matters less.
+
+The practical outcome is that `FADE_SAMPLES` in the opcode can drop from 2048 to 512 (42ms to ~10ms), which makes the note-on feel much more immediate. The cost is accuracy at very low cutoff frequencies.
+
+Next: try `warmup_size = 256` to see how far the tradeoff goes.
+
+## Testing run 12 in the MIDI opcode
+
+Updated `FADE_SAMPLES` in `moognn.cpp` from 1024 to 512 to match the new training warmup, then pointed both test CSDs at `ref/12_moog_warmup512/weights.json`. Rebuilt the DLL and tested with `test_midi_saw.csd` using a MIDI controller with CC 110 mapped to cutoff.
+
+The clicking was still pretty bad. Reducing the fade to 512 samples just exposes more of the convergence period instead of eliminating it.
+
+The root cause is architectural, not about fade length. Without `knob_to_h0`, the GRU starts cold at every note-on with no knowledge of the target filter state. It has to infer the correct mode from the knob value in the input stream over time, and that inference takes longer than 512 samples regardless of how the training warmup is set. Shortening the training warmup just moves the goalposts.
+
+The practical workaround is to run the opcode as an always-on send effect rather than instantiating it per note. One instance processes the mixed signal continuously, so the GRU state is never reset and the cold-start problem never happens. This is actually closer to how RTNeural is designed to be used: continuous streaming inference with a stateful GRU. It also mirrors how a real mono Moog works, where the filter is always on and all voices share it.
+
+For true per-note independent filter instances, `knob_to_h0` is still the correct fix. The ablation showed it produces cleaner convergence and about 3dB better accuracy. The custom inference path for it already exists in `process_wav_torch_param.cpp` and the trained models with it are in the ref folder.
+
+## Run 13: warmup_size = 256
+
+Same 64-unit architecture, warmup halved again to 256 samples (~5ms). Early stopped at epoch 211 in 27.1 minutes. LR stepped 4 times: 5e-4 at epoch 109, 2.5e-4 at epoch 132, 1.25e-4 at epoch 152, 6.25e-5 at epoch 192. Best val_loss: 0.0002 — worse than run 12's 0.0001.
+
+```
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0181      -17.4dB  ok
+        60    0.0006      -32.0dB  good
+       100    0.0005      -33.3dB  good
+       125    0.0004      -33.6dB  good
+       250    0.0003      -34.9dB  good
+       500    0.0002      -37.4dB  good
+       800    0.0001      -41.7dB  good
+      1000    0.0000      -43.7dB  good
+      2000    0.0000      -43.8dB  good
+      4000    0.0000      -44.3dB  good
+      8000    0.0000      -43.4dB  good
+     12000    0.0001      -42.2dB  good
+     16000    0.0001      -40.1dB  good
+     20000    0.0001      -43.0dB  good
+```
+
+Full comparison across all three warmup runs:
+
+| Freq | Run 11 (2048) | Run 12 (512) | Run 13 (256) |
+|------|--------------|-------------|-------------|
+| 20Hz | -24.9dB | -19.1dB | -17.4dB |
+| 60Hz | -35.0dB | -34.8dB | -32.0dB |
+| 250Hz | -41.3dB | -38.9dB | -34.9dB |
+| 500Hz | -42.8dB | -43.2dB | -37.4dB |
+| 1kHz | -43.2dB | -46.5dB | -43.7dB |
+| 8kHz | -43.9dB | -45.8dB | -43.4dB |
+| 16kHz | -45.0dB | -47.3dB | -40.1dB |
+
+The trend inverted. Run 12 (512) had better mid-high accuracy than run 11 because the shorter window forced faster convergence. Run 13 (256) undoes that gain: 60-500Hz is now worse than both previous runs, and 12-16kHz dropped noticeably. The window is now short enough that the GRU doesn't get enough audio context during training to learn the filter behavior reliably. 20Hz continued its decline to -17.4dB.
+
+Run 12 (warmup 512) was the sweet spot for this experiment series. Going shorter just degrades accuracy across the board.
+
+Not even bothering with trying this model. I was training it while I was testing the previous one. The previous one didn't work so this one won't either, as in it'll still click when using the shorter warmup size.
+

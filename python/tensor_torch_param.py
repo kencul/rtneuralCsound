@@ -18,6 +18,20 @@ if len(sys.argv) != 2:
 OUT_DIR = sys.argv[1]
 os.makedirs(OUT_DIR, exist_ok=True)
 
+class _Tee:
+    def __init__(self, *streams):
+        self._streams = streams
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+_log = open(os.path.join(OUT_DIR, "training.log"), "w")
+sys.stdout = _Tee(sys.__stdout__, _log)
+sys.stderr = _Tee(sys.__stderr__, _log)
+
 FREQ_MIN = 20.0
 FREQ_MAX = 20000.0
 
@@ -70,7 +84,7 @@ class Model(nn.Module):
 
 
 window_size = 8192
-warmup_size = 2048
+warmup_size = 256
 
 
 def load_conditioned_windows(dry_path, wet_path, knob_value_normalized, sr=None):

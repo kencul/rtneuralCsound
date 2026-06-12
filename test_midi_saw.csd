@@ -24,11 +24,11 @@ instr 1
 
   asaw   poscil kadsr * iamp, ifreq, gisaw      ; sawtooth
 
-  kcc      ctrl7 1, 110, 0, 1
+  kcc      ctrl7 1, 14, 0, 1
   kcc = portk:k(kcc, 0.01)
   kcutoff  = 20 * pow(1000, kcc)
 
-  aout   moognn asaw, "ref/11_moog_20-20k_AGAM+conv_64u/weights.json", kcutoff
+  aout   moognn asaw, "ref/12_moog_warmup512/weights.json", kcutoff
          out aout
 endin
 
