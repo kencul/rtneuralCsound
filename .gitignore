@@ -31,3 +31,5 @@ audio/filteredOutput/
 
 # present from another branch, not tracked here
 vendor/csound/
+
+AnalogFilter/

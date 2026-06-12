@@ -982,3 +982,137 @@ Test output sounds good so far:
 ```bash
 csound test_passthrough.csd
 ```
+
+## CPOF API cleanup and fixing note-on clicks
+
+Went back and cleaned up the opcode against the CPOF examples and README in `vendor/csound/examples/plugin/`.
+
+Three things were wrong with how the opcode was written:
+
+First, string args should be accessed via `inargs.str_data(1).data` rather than manually casting the raw pointer. The README shows this clearly and it's cleaner.
+
+Second, audio buffer pointers should use `outargs.data(0)` and `inargs.data(0)` instead of `&outargs[0]` and `&inargs[0]`. Both work, but the former is the designed API.
+
+Third, the README examples call `sa_offset(out)` at the top of `aperf()` to zero the `[0, offset)` region of the output buffer for sample-accurate scheduling. Added this call — but it immediately caused a build error:
+
+```
+error C2660: 'csnd::Plugin<1,3>::sa_offset': function does not take 1 arguments
+```
+
+Checking the installed Csound 7 `plugin.h`, `sa_offset()` takes no arguments in Csound 7 and is marked as called implicitly before `aperf()`. The README documents the Csound 6 API. The actual `opcodes.cpp` example file doesn't call `sa_offset()` at all, which is consistent with Csound 7 handling it automatically. Removed the call.
+
+---
+
+With the cleanup done, I made a second csound script that takes MIDI input to play a sawtooth wave in realtime. This way, I can use MIDI CC to adjust the cutoff while playing to see how the opcode feels using it.
+
+There was a noticeable click at the start of every note. The cause is the GRU cold start: `init()` resets the hidden state to zeros, but the model was trained with a 2048-sample warmup period before loss was ever calculated. The GRU had never learned to produce correct output from a dead zero state, only from a warmed-up one. So the first ~42ms of every note is the GRU catching up, which manifests as a transient.
+
+The fix is to pre-warm the GRU at `init()` time by running 2048 samples of silence through the model at the initial cutoff before any real audio arrives. This replicates the training warmup. Added to the end of `init()`:
+
+```cpp
+float knob = normalizeKnob((float)inargs[2]);
+float convIn[1] = {0.0f};
+float gruIn[17] = {};
+gruIn[16] = knob;
+for (int i = 0; i < 2048; i++) {
+    model->conv.forward(convIn);
+    std::copy(model->conv.getOutputs(), model->conv.getOutputs() + 16, gruIn);
+    gruIn[16] = knob;
+    model->rec.forward(gruIn);
+}
+```
+
+This runs at i-time so there's no per-block overhead. The click is gone.
+
+## Live MIDI test: test_midi_saw.csd
+
+Wrote a live MIDI test file to play the opcode in real time. A sawtooth oscillator driven by MIDI note data goes through the moognn filter, with CC 110 controlling the cutoff.
+
+The cutoff is mapped on a log scale from 20Hz to 20kHz, matching how the training data was generated:
+
+```csound
+kcc     ctrl7 1, 110, 0, 1
+kcc     = portk:k(kcc, 0.01)    ; smooth out CC steps
+kcutoff = 20 * pow(1000, kcc)
+```
+
+`portk` with a 10ms smoothing time prevents zipper noise from discrete CC steps.
+
+Initial attempt had about half a second of latency. Csound defaults to large hardware buffers. Fixed by adding `-b 256 -B 4096` to CsOptions, which drops latency to ok levels.
+
+Also `-M a` opens all MIDI input devices at once so any connected controller works without specifying a device number.
+
+Using this program exposed another issue. When playing 3 or more notes at a time, the playback cuts out for a bit. I would guess that the init function can't process fast enough, causing audio dropouts when too many instances of the opcode are initialized at once. Could be the pre warm loop or more likely parsing of the JSON file.
+
+To debug, add timing to init(). Add chrono as an include and time the file parse, alloc, weights and warmup, then print the timings.
+
+this prints this:
+
+```bash
+moognn init: file+parse=7.99ms  alloc=0.01ms  weights=0.16ms  warmup=2.90ms  total=11.07ms
+```
+
+This shows that the json file IO and parsing is the big issue. with a ksmps of 64 at 48kHz, each block is 1.3ms. three notes causes 33ms of blocked init, which means 25 missed callbacks.
+
+The fix is to cache the loaded model globally, keyed by file path. The first note pays the full ~11ms cost. Every subsequent note skips the file IO and JSON parse, and just copy-constructs from the cached model and calls `reset()` to clear the hidden state. RTNeural's ModelT uses Eigen fixed-size matrices which are copy-constructible, so this is effectively a fast memcpy of the weights with a fresh GRU state.
+
+```cpp
+static std::unordered_map<std::string, Model*> g_model_cache;
+
+// In init():
+if (g_model_cache.find(path) == g_model_cache.end()) {
+    // load from disk and parse JSON — once per unique path
+    Model *tmpl = new Model();
+    // ... load weights ...
+    g_model_cache[path] = tmpl;
+}
+model = new Model(*g_model_cache[path]);  // copy weights
+model->conv.reset();
+model->rec.reset();
+// pre-warm as before
+```
+
+The copy-construction approach broke the opcode entirely, making it pass through audio with no filtering. Turned out RTNeural's `Conv1DT` has an `Eigen::Map` member called `outs` that gets initialized in the constructor to point to its own internal `outs_internal` raw array. The default copy constructor copies the Map's pointer as-is, so the copy's `outs` still points to the original's `outs_internal`. Every voice ends up reading from and writing to the same output buffer. The model outputs garbage, and with the skip connection (`result + input`), garbage near zero sounds like a passthrough.
+
+The fix is to cache the parsed JSON instead of the Model. Each voice loads weights from the in-memory JSON (0.16ms) rather than from disk, allocates its own Model, and gets a clean unaliased output buffer. Per-note cost is now about 3ms (weight load from memory plus pre-warm), which is well within budget.
+
+```cpp
+static std::unordered_map<std::string, nlohmann::json> g_json_cache;
+
+if (g_json_cache.find(path) == g_json_cache.end()) {
+    std::ifstream f(path);
+    g_json_cache[path] = nlohmann::json::parse(f);
+}
+const nlohmann::json& j = g_json_cache[path];
+model = new Model();
+// load weights from in-memory JSON as normal
+```
+
+## Fixing the note-on click properly
+
+With the dropout fix in place, the clicking at note-on came back. The original silence pre-warm was removed and replaced with caching, which masked the issue. Time to understand it properly.
+
+Checked `tensor_torch_param.py` to see exactly what the training warmup was doing:
+
+```python
+loss = esr_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
+```
+
+The model receives `warmup_size + window_size` samples of real audio, but loss is only calculated on the window portion. The GRU starts from `h0 = zeros` and sees 2048 samples of real audio before it needs to be accurate. It was never trained on silence during warmup.
+
+The silence pre-warm I had added was based on wrong reasoning. It conditioned the GRU for silence rather than letting it converge on actual audio. When real audio then arrived, the GRU had to reconverge anyway, potentially making the transient worse. The devlog had already flagged this as a known limitation back when evaluating the model: the first 42ms of any new note is outside the training loss window, so the model has no guarantee of accuracy there.
+
+The correct fix is an output fade-in that covers the convergence window. No pre-warm needed. The GRU starts from zero and sees real audio exactly as in training, and the fade hides the inaccurate startup period.
+
+Tried 512 samples (10ms) and 1024 samples (21ms), both still had audible clicks. 2048 samples (42ms) eliminates the click completely, which makes sense since that matches the full training warmup length. Left it at 2048 for now.
+
+```cpp
+static constexpr uint32_t FADE_SAMPLES = 2048;
+
+// in aperf():
+float fade = (fade_counter < FADE_SAMPLES) ? (float)fade_counter / FADE_SAMPLES : 1.0f;
+out[i] = (MYFLT)((result + convIn[0]) * fade);
+if (fade_counter < FADE_SAMPLES) fade_counter++;
+```
+
+The fade is linear over 42ms. With a 10ms attack envelope on the oscillator input, the combined effect is a gentle ramp that covers the full GRU convergence window without sounding like a slow attack on normal playing.
