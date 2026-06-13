@@ -1243,3 +1243,21 @@ Run 12 (warmup 512) was the sweet spot for this experiment series. Going shorter
 
 Not even bothering with trying this model. I was training it while I was testing the previous one. The previous one didn't work so this one won't either, as in it'll still click when using the shorter warmup size.
 
+
+## Next topics to research
+
+Definitely realistic:
+
+1. knob_to_h0 in the opcode — straightforward. The model is already trained with it (ref/09), the math is simple (tanh(W * cutoff + b)), and you just need to load those weights from JSON and overwrite RTNeural's GRU state pointer in init(). RTNeural is fine here — the knob_to_h0 layer runs in plain C++ outside the RTNeural inference loop.
+
+3. LSTM swap — trivial. RTNeural supports LSTM natively, same as GRU. One line change in the training script, one template change in the C++. Worth a run just to see the numbers.
+
+5. A-weighting pre-emphasis — a few lines in the training script. Zero inference impact, zero RTNeural involvement.
+
+2. Dynamic cutoff training data — realistic but a project of its own. The C++ generator already exists, you just need to add LFO modulation and log the per-sample cutoff value. The training script change is also manageable. RTNeural is not involved — the model architecture doesn't change.
+
+Less realistic / diminishing returns:
+
+4. FiLM conditioning — this is where RTNeural becomes a limitation. FiLM requires a secondary network feeding scale/shift factors into the feature maps between layers. That's not a sequential chain of native layers, so RTNeural's static graph can't represent it. You'd need custom C++ inference for the FiLM part, and for a single scalar knob, knob_to_h0 + dynamic training data probably gets you most of the way there for far less complexity. FiLM makes more sense for two or more parameters.
+
+6. Grey-box state matching — academically interesting, and RTNeural is actually fine for inference since the state-matching layer is discarded after training. But it requires modifying the C++ generator to output all four internal capacitor voltages at sample rate, and adding a learnable projection layer to the training pipeline. The payoff is better stability under heavy resonance and fast sweeps, which is real but speculative until you actually have the dynamic cutoff problem measured.
