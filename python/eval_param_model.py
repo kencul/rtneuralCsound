@@ -39,6 +39,8 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv = CausalConv1d(in_channels=1, out_channels=16, kernel_size=31)
+        self.norm = nn.LayerNorm(16)
+        self.knob_to_h0 = nn.Sequential(nn.Linear(1, GRU_HIDDEN), nn.Tanh())
         self.gru = nn.GRU(17, GRU_HIDDEN, batch_first=True)
         self.dense = nn.Linear(GRU_HIDDEN, 1)
 
@@ -49,6 +51,11 @@ class Model(nn.Module):
         conv_out = audio.permute(0, 2, 1)
         conv_out = self.conv(conv_out)
         conv_out = conv_out.permute(0, 2, 1)  # (batch, time, 16)
+        conv_out = self.norm(conv_out)
+
+        if h is None:
+            knob_val = knob[:, 0, :]
+            h = self.knob_to_h0(knob_val).unsqueeze(0)
 
         gru_input = torch.cat([conv_out, knob], dim=-1)
         out, h_out = self.gru(gru_input, h)
