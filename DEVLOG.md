@@ -877,3 +877,387 @@ Doubling units recovered ~5dB at low frequencies, ~3-4dB at mid, and made essent
 | 8kHz | -48.1dB | -42.7dB | -41.6dB | -44.2dB | **-43.9dB** |
 
 The 64-unit all-native model sits roughly on par with the 32-unit `k2h0`-only run at most frequencies, and slightly ahead at mid-high. It does not match the 32-unit `k2h0 + LN` baseline at low frequencies (5–7dB gap at 20-60Hz remains), confirming that unit count alone cannot recover the synergistic effect of both components. However, as the best fully RTNeural-native option, it is a viable deployment target if real-time performance testing rules out the custom inference path.
+
+## Csound Opcode
+
+Given that the Csound opcode is the non-negotiable deliverable, option 3 is likely the most pragmatic — the custom inference path already works, and accuracy should not be traded away for an architectural constraint that was always self-imposed.
+
+Writing a Csound opcode can be done as a plugin. This would allow me to use C++ to write the opcode while using just the Csound header. This approach has the advantage that I only need to include the `include/` folder of the Csound repo. This means the entire Csound repo exists here, but the headers are used to build my opcode plugin and nothing else.
+
+Apparently, making a Csound opcode doesn't use a `.lib` file, but a big struct called `CSOUND` which contains funciton pointers for everythin I need for a plugin. I should also keep in mind this struct changes between windows and linux/mac for future compatibility issues.
+
+Here is what I need to do to get a working opcode:
+
+- Decide on and train final native-architecture model (Conv1d → concat knob → GRU → Dense + skip, no LayerNorm, no knob_to_h0) — pick unit count (32 or 64)
+- Add csound repo as git submodule at vendor/csound/
+- Update CMakeLists.txt: add opcode MODULE target alongside existing tool targets
+- Write src/rtneural_opcode.cpp: load JSON via parseJson<float>, stateful GRU inference across ksmps blocks, k-rate cutoff parameter
+- Write test/test.csd and place model JSON in test/models/
+- Build opcode DLL and verify it loads and processes audio correctly in Csound
+
+In terms of the final model format, I will be using full native layers with 64 units. TBD
+
+First add csound as a submodule:
+
+```bash
+git submodule add https://github.com/csound/csound vendor/csound
+```
+
+Added Csound as a submodule and started wiring up the build. The plan is to build a `.dll` plugin that Csound loads at runtime, using the CPOF (C++ Plugin Opcode Framework) which lives in `vendor/csound/include/plugin.h` and `modload.h`. The framework is header-only, so no need to actually build Csound. Just include the headers and let Csound's installed binary load the plugin at runtime.
+
+First problem: Csound's headers depend on two generated files, `float-version.h` and `version.h`, that are normally produced by Csound's own CMake configure step. They're both `.h.in` templates in `vendor/csound/include/`. Rather than running Csound's full CMake build (which pulls in a ton of dependencies), I added two `configure_file` calls to my own root `CMakeLists.txt`. `float-version.h` just sets `USE_DOUBLE` (standard double-precision Csound), and `version.h` fills in the version numbers (7.0.0 from Csound's CMakeLists). Both get generated into `vendor/csound/include/` at configure time.
+
+Also found that the root CMakeLists had two broken targets left over from the migration: `add_tool(process_wav_torch_param)` was looking for a file named `process_wav_torch_param.cpp` but the actual file was `process_wav_torch_param2.cpp`, and `add_tool(process_wav_torch_param2)` pointed at a directory that doesn't exist. Renamed the source file to drop the "2" and removed the dead target, so `add_tool(process_wav_torch_param)` works cleanly again.
+
+Wrote the initial passthrough opcode in `src/csound_opcode/moognn.cpp`. The CPOF API is cleaner than I expected: inherit from `csnd::Plugin<nout, nin>`, implement `init()` and `aperf()`, register with `csnd::plugin<>()` in `on_load()`. The `sa_offset()` call happens automatically before `aperf()`, zeroing the offset/early regions of the output buffer for sample-accurate event scheduling. So the actual passthrough body is just a `std::copy` from input to output over `[offset, nsmps)`.
+
+Added the `moognn` shared library target to CMakeLists with `PREFIX ""` so the output is `moognn.dll` not `libmoognn.dll` (Csound expects no prefix on Windows). Built successfully:
+
+```
+moognn.vcxproj -> build\bin\Release\moognn.dll
+```
+
+Wrote `test_passthrough.csd` using `--opcode-lib=build/bin/Release/moognn.dll` to load the plugin directly. Running it gave:
+
+```
+Loading command-line libraries:
+  build/bin/Release/moognn.dll
+error:  Unable to find opcode with name: moognn
+```
+
+The DLL loaded, as the C exports `csoundModuleCreate`/`Init`/`Destroy` were found and called, but the opcode never registered. The cause was a header mismatch: the vendor `csound` submodule is at commit `1a99bfddf` (a development snapshot labeled `6.17.0-3673`), while the installed Csound binary is the actual 7.0 release. These two versions have a different internal `CSOUND` struct layout. The struct is a large table of function pointers, including `AppendOpcode`, which is how `csnd::plugin<>()` registers opcodes at runtime. Compiling against the pre-7.0 headers put `AppendOpcode` at the wrong offset, so the call silently hit garbage and the opcode was never registered.
+
+Fix: point the `moognn` build target at the installed Csound 7.0 headers (`C:/Program Files/Csound7/include/csound/`) instead of the vendor submodule. These headers already have `float-version.h` and `version.h` generated, so the `configure_file` steps were removed. The `CSOUND_INCLUDE_DIR` CMake cache variable defaults to the installed path but can be overridden. The vendor submodule stays for reading the Csound source, but cannot be used as the compile target.
+
+Rebuilt against the correct headers and the DLL is ready to test.
+
+Build the opcode DLL:
+
+```bash
+cmake -Bbuild
+cmake --build build --config Release --target moognn
+# output: build/bin/Release/moognn.dll
+```
+
+Test with the passthrough `.csd`:
+
+```bash
+csound test_passthrough.csd
+```
+
+The `.csd` uses `--opcode-lib=build/bin/Release/moognn.dll` to load the plugin directly without needing to install it or set `OPCODE6DIR64`. To install permanently, copy `moognn.dll` to `C:/Program Files/Csound7/plugins64/`.
+
+## RTNeural inference in the opcode
+
+With the plugin pipeline confirmed working, replaced the passthrough with real RTNeural inference using the 64-unit all-native model (run 11).
+
+The model types mirror the architecture exactly: compile-time template parameters, same as in `process_wav_torch_param.cpp`, but 64 units and no `LayerNorm` or `knob_to_h0`:
+
+```cpp
+using ConvStage = RTNeural::ModelT<float, 1, 16,
+    RTNeural::Conv1DT<float, 1, 16, 31, 1>>;
+
+using RecurrentStage = RTNeural::ModelT<float, 17, 1,
+    RTNeural::GRULayerT<float, 17, 64>,
+    RTNeural::DenseT<float, 64, 1>>;
+```
+
+The opcode signature changed from `"ak"` to `"aSk"`: audio in, string model path, k-rate cutoff. In CPOF's `Param<>`, string args are stored as `STRINGDAT*` behind the `MYFLT*` pointer, so they're accessed via a cast: `(STRINGDAT*)inargs.begin()[1]`. Weights are loaded in `init()` using `torch_helpers`, same key prefixes as the training script (`"conv.conv."`, `"gru."`, `"dense."`). The model is heap-allocated with `new`/`delete` (freed in `deinit()`) to avoid stack overflow from Eigen's fixed-size matrices.
+
+The `aperf()` loop runs per-sample inference over `[offset, nsmps)`: forward through conv, concat the normalized knob as the 17th feature, forward through GRU+Dense, then add the raw audio as the skip connection.
+
+Hit one build error: including Csound headers before RTNeural caused macro collisions. Csound's C API defines macros that trample C++ reserved words, breaking `<chrono>` when Eigen/RTNeural pulls it in. Fix: include RTNeural and all standard library headers before the Csound headers.
+
+Built successfully. Updated `test_passthrough.csd` to pass the model path and a `linseg` cutoff sweep (50Hz → 5kHz → 50Hz over 5 seconds) to test both inference and real-time parameter control in one pass:
+
+```csound
+ain   diskin "audio/bench_mono.wav", 1
+klin = linseg:k(50, 2.5, 5000, 2.5, 50)
+aout  moognn ain, "ref/11_moog_20-20k_AGAM+conv_64u/weights.json", klin
+      out aout
+```
+
+Test output sounds good so far:
+
+```bash
+csound test_passthrough.csd
+```
+
+## CPOF API cleanup and fixing note-on clicks
+
+Went back and cleaned up the opcode against the CPOF examples and README in `vendor/csound/examples/plugin/`.
+
+Three things were wrong with how the opcode was written:
+
+First, string args should be accessed via `inargs.str_data(1).data` rather than manually casting the raw pointer. The README shows this clearly and it's cleaner.
+
+Second, audio buffer pointers should use `outargs.data(0)` and `inargs.data(0)` instead of `&outargs[0]` and `&inargs[0]`. Both work, but the former is the designed API.
+
+Third, the README examples call `sa_offset(out)` at the top of `aperf()` to zero the `[0, offset)` region of the output buffer for sample-accurate scheduling. Added this call — but it immediately caused a build error:
+
+```
+error C2660: 'csnd::Plugin<1,3>::sa_offset': function does not take 1 arguments
+```
+
+Checking the installed Csound 7 `plugin.h`, `sa_offset()` takes no arguments in Csound 7 and is marked as called implicitly before `aperf()`. The README documents the Csound 6 API. The actual `opcodes.cpp` example file doesn't call `sa_offset()` at all, which is consistent with Csound 7 handling it automatically. Removed the call.
+
+---
+
+With the cleanup done, I made a second csound script that takes MIDI input to play a sawtooth wave in realtime. This way, I can use MIDI CC to adjust the cutoff while playing to see how the opcode feels using it.
+
+There was a noticeable click at the start of every note. The cause is the GRU cold start: `init()` resets the hidden state to zeros, but the model was trained with a 2048-sample warmup period before loss was ever calculated. The GRU had never learned to produce correct output from a dead zero state, only from a warmed-up one. So the first ~42ms of every note is the GRU catching up, which manifests as a transient.
+
+The fix is to pre-warm the GRU at `init()` time by running 2048 samples of silence through the model at the initial cutoff before any real audio arrives. This replicates the training warmup. Added to the end of `init()`:
+
+```cpp
+float knob = normalizeKnob((float)inargs[2]);
+float convIn[1] = {0.0f};
+float gruIn[17] = {};
+gruIn[16] = knob;
+for (int i = 0; i < 2048; i++) {
+    model->conv.forward(convIn);
+    std::copy(model->conv.getOutputs(), model->conv.getOutputs() + 16, gruIn);
+    gruIn[16] = knob;
+    model->rec.forward(gruIn);
+}
+```
+
+This runs at i-time so there's no per-block overhead. The click is gone.
+
+## Live MIDI test: test_midi_saw.csd
+
+Wrote a live MIDI test file to play the opcode in real time. A sawtooth oscillator driven by MIDI note data goes through the moognn filter, with CC 110 controlling the cutoff.
+
+The cutoff is mapped on a log scale from 20Hz to 20kHz, matching how the training data was generated:
+
+```csound
+kcc     ctrl7 1, 110, 0, 1
+kcc     = portk:k(kcc, 0.01)    ; smooth out CC steps
+kcutoff = 20 * pow(1000, kcc)
+```
+
+`portk` with a 10ms smoothing time prevents zipper noise from discrete CC steps.
+
+Initial attempt had about half a second of latency. Csound defaults to large hardware buffers. Fixed by adding `-b 256 -B 4096` to CsOptions, which drops latency to ok levels.
+
+Also `-M a` opens all MIDI input devices at once so any connected controller works without specifying a device number.
+
+Using this program exposed another issue. When playing 3 or more notes at a time, the playback cuts out for a bit. I would guess that the init function can't process fast enough, causing audio dropouts when too many instances of the opcode are initialized at once. Could be the pre warm loop or more likely parsing of the JSON file.
+
+To debug, add timing to init(). Add chrono as an include and time the file parse, alloc, weights and warmup, then print the timings.
+
+this prints this:
+
+```bash
+moognn init: file+parse=7.99ms  alloc=0.01ms  weights=0.16ms  warmup=2.90ms  total=11.07ms
+```
+
+This shows that the json file IO and parsing is the big issue. with a ksmps of 64 at 48kHz, each block is 1.3ms. three notes causes 33ms of blocked init, which means 25 missed callbacks.
+
+The fix is to cache the loaded model globally, keyed by file path. The first note pays the full ~11ms cost. Every subsequent note skips the file IO and JSON parse, and just copy-constructs from the cached model and calls `reset()` to clear the hidden state. RTNeural's ModelT uses Eigen fixed-size matrices which are copy-constructible, so this is effectively a fast memcpy of the weights with a fresh GRU state.
+
+```cpp
+static std::unordered_map<std::string, Model*> g_model_cache;
+
+// In init():
+if (g_model_cache.find(path) == g_model_cache.end()) {
+    // load from disk and parse JSON — once per unique path
+    Model *tmpl = new Model();
+    // ... load weights ...
+    g_model_cache[path] = tmpl;
+}
+model = new Model(*g_model_cache[path]);  // copy weights
+model->conv.reset();
+model->rec.reset();
+// pre-warm as before
+```
+
+The copy-construction approach broke the opcode entirely, making it pass through audio with no filtering. Turned out RTNeural's `Conv1DT` has an `Eigen::Map` member called `outs` that gets initialized in the constructor to point to its own internal `outs_internal` raw array. The default copy constructor copies the Map's pointer as-is, so the copy's `outs` still points to the original's `outs_internal`. Every voice ends up reading from and writing to the same output buffer. The model outputs garbage, and with the skip connection (`result + input`), garbage near zero sounds like a passthrough.
+
+The fix is to cache the parsed JSON instead of the Model. Each voice loads weights from the in-memory JSON (0.16ms) rather than from disk, allocates its own Model, and gets a clean unaliased output buffer. Per-note cost is now about 3ms (weight load from memory plus pre-warm), which is well within budget.
+
+```cpp
+static std::unordered_map<std::string, nlohmann::json> g_json_cache;
+
+if (g_json_cache.find(path) == g_json_cache.end()) {
+    std::ifstream f(path);
+    g_json_cache[path] = nlohmann::json::parse(f);
+}
+const nlohmann::json& j = g_json_cache[path];
+model = new Model();
+// load weights from in-memory JSON as normal
+```
+
+Eventually, the model json can be fully embedded into the plugin, but it can be loaded like this for dev purposes.
+
+## Fixing the note-on click properly
+
+With the dropout fix in place, the clicking at note-on came back. The original silence pre-warm was removed and replaced with caching, which masked the issue. Time to understand it properly.
+
+Checked `tensor_torch_param.py` to see exactly what the training warmup was doing:
+
+```python
+loss = esr_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
+```
+
+The model receives `warmup_size + window_size` samples of real audio, but loss is only calculated on the window portion. The GRU starts from `h0 = zeros` and sees 2048 samples of real audio before it needs to be accurate. It was never trained on silence during warmup.
+
+The silence pre-warm I had added was based on wrong reasoning. It conditioned the GRU for silence rather than letting it converge on actual audio. When real audio then arrived, the GRU had to reconverge anyway, potentially making the transient worse. The devlog had already flagged this as a known limitation back when evaluating the model: the first 42ms of any new note is outside the training loss window, so the model has no guarantee of accuracy there.
+
+The correct fix is an output fade-in that covers the convergence window. No pre-warm needed. The GRU starts from zero and sees real audio exactly as in training, and the fade hides the inaccurate startup period.
+
+Tried 512 samples (10ms) and 1024 samples (21ms), both still had audible clicks. 2048 samples (42ms) eliminates the click completely, which makes sense since that matches the full training warmup length. Left it at 2048 for now.
+
+```cpp
+static constexpr uint32_t FADE_SAMPLES = 2048;
+
+// in aperf():
+float fade = (fade_counter < FADE_SAMPLES) ? (float)fade_counter / FADE_SAMPLES : 1.0f;
+out[i] = (MYFLT)((result + convIn[0]) * fade);
+if (fade_counter < FADE_SAMPLES) fade_counter++;
+```
+
+The fade is linear over 42ms. With a 10ms attack envelope on the oscillator input, the combined effect is a gentle ramp that covers the full GRU convergence window without sounding like a slow attack on normal playing.
+
+42ms is too long to be practical without an ADSR. The goal is to get the fade short enough that the opcode can be used as a raw filter with no envelope and no audible click on note-on.
+
+Two experiments are worth running to get there.
+
+**Experiment 1: shorter warmup in training**
+
+The `warmup_size = 2048` in `tensor_torch_param.py` defines the requirement: be accurate after X samples from a cold start. Reducing it forces the model to converge faster, because the loss kicks in sooner.
+
+Try 512 first, then 256. If the retrained model is click-free at those fade lengths in the opcode, the problem is solved without touching the architecture. This is the lowest-risk experiment and should be run first.
+
+There is no hard minimum floor from the conv1d. Looking at the training script, `CausalConv1d.forward()` zero-pads every window on the left by `kernel_size - 1 = 30` samples before applying the convolution. This means every training window starts with a zero-filled kernel buffer, which is exactly the same state as a freshly reset `Conv1DT` in RTNeural at note-on. The model has seen this condition for every window across the entire training run. The conv1d empty buffer at note-on is not a special edge case and is not contributing to the click. The warmup length is purely a GRU convergence problem.
+
+**Experiment 2: remove conv1d**
+
+No data exists in this project on a conv1d vs no-conv1d comparison. The decision to keep it was reasoned, not measured. This experiment is worth running to measure the accuracy difference, but removing conv1d will not help with warmup length since the conv buffer state at note-on already matches training exactly. The only motivation here is accuracy vs complexity, not cold-start behavior.
+
+This experiment only makes sense if experiment 1 shows the architecture can't converge fast enough. The accuracy hit might not be worth it.
+
+**What neither experiment addresses**
+
+Without `knob_to_h0`, the GRU has no prior knowledge of the target filter state at note-on. It has to infer the correct filter mode from the knob value embedded in the audio stream over time. That inference cost is the fundamental cause of the long warmup, and it doesn't go away by shortening the training warmup or removing conv1d. Those just force the model to learn to converge faster, not to start in the right state.
+
+The C++ processing script (`process_wav_torch_param.cpp`) demonstrates the solved case: `prepareModel()` seeds the GRU from `knob_to_h0` and needs zero warmup. The devlog ablation shows `knob_to_h0` contributes about 3dB of accuracy and provides much cleaner convergence behavior.
+
+If both experiments fail to get below a practical warmup length, adding `knob_to_h0` back into the opcode is the right call. The custom inference path already exists in `process_wav_torch_param.cpp` and the architecture exists in the ref models. For the paper this is also the more interesting result. It directly validates the architectural decision from the ablation study with a real-world consequence.
+
+## Training with 512 sample warmup
+
+Training script already has a `warmup_size` var. Changing it then running the training is all that's needed to do this experiment.
+
+Also added a tee in the script so all console output is automatically saved to `training.log` in the output dir.
+
+Run 12: `warmup_size = 512`, same 64-unit architecture as run 11. Training ran 275 epochs (early stopped), 36.6 minutes. LR stepped 5 times: 1e-3 at start, then 5e-4 at epoch 116, 2.5e-4 at epoch 186, 1.25e-4 at epoch 209, 6.25e-5 at epoch 233, 3.13e-5 at epoch 256. Solid convergence, no major spikes.
+
+```
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0123      -19.1dB  ok
+        60    0.0003      -34.8dB  good
+       100    0.0003      -35.4dB  good
+       125    0.0003      -35.5dB  good
+       250    0.0001      -38.9dB  good
+       500    0.0000      -43.2dB  good
+       800    0.0000      -45.7dB  good
+      1000    0.0000      -46.5dB  good
+      2000    0.0000      -47.4dB  good
+      4000    0.0000      -46.1dB  good
+      8000    0.0000      -45.8dB  good
+     12000    0.0000      -47.1dB  good
+     16000    0.0000      -47.3dB  good
+     20000    0.0000      -46.3dB  good
+```
+
+Comparing against run 11 (same architecture, warmup 2048):
+
+| Freq | Run 11 (warmup 2048) | Run 12 (warmup 512) |
+|------|---------------------|---------------------|
+| 20Hz | -24.9dB | -19.1dB |
+| 60Hz | -35.0dB | -34.8dB |
+| 250Hz | -41.3dB | -38.9dB |
+| 500Hz | -42.8dB | -43.2dB |
+| 1kHz | -43.2dB | -46.5dB |
+| 8kHz | -43.9dB | -45.8dB |
+| 20kHz | -46.5dB | -46.3dB |
+
+The tradeoff is exactly what you'd expect. 20Hz dropped about 6dB and is now borderline "ok", and 60-250Hz lost a few dB. From 500Hz up, run 12 is actually slightly better than run 11. The shorter warmup forced the GRU to converge faster, and that learned behavior is stronger in the mid-high range where filter state history matters less.
+
+The practical outcome is that `FADE_SAMPLES` in the opcode can drop from 2048 to 512 (42ms to ~10ms), which makes the note-on feel much more immediate. The cost is accuracy at very low cutoff frequencies.
+
+Next: try `warmup_size = 256` to see how far the tradeoff goes.
+
+## Testing run 12 in the MIDI opcode
+
+Updated `FADE_SAMPLES` in `moognn.cpp` from 1024 to 512 to match the new training warmup, then pointed both test CSDs at `ref/12_moog_warmup512/weights.json`. Rebuilt the DLL and tested with `test_midi_saw.csd` using a MIDI controller with CC 110 mapped to cutoff.
+
+The clicking was still pretty bad. Reducing the fade to 512 samples just exposes more of the convergence period instead of eliminating it.
+
+The root cause is architectural, not about fade length. Without `knob_to_h0`, the GRU starts cold at every note-on with no knowledge of the target filter state. It has to infer the correct mode from the knob value in the input stream over time, and that inference takes longer than 512 samples regardless of how the training warmup is set. Shortening the training warmup just moves the goalposts.
+
+The practical workaround is to run the opcode as an always-on send effect rather than instantiating it per note. One instance processes the mixed signal continuously, so the GRU state is never reset and the cold-start problem never happens. This is actually closer to how RTNeural is designed to be used: continuous streaming inference with a stateful GRU. It also mirrors how a real mono Moog works, where the filter is always on and all voices share it.
+
+For true per-note independent filter instances, `knob_to_h0` is still the correct fix. The ablation showed it produces cleaner convergence and about 3dB better accuracy. The custom inference path for it already exists in `process_wav_torch_param.cpp` and the trained models with it are in the ref folder.
+
+## Run 13: warmup_size = 256
+
+Same 64-unit architecture, warmup halved again to 256 samples (~5ms). Early stopped at epoch 211 in 27.1 minutes. LR stepped 4 times: 5e-4 at epoch 109, 2.5e-4 at epoch 132, 1.25e-4 at epoch 152, 6.25e-5 at epoch 192. Best val_loss: 0.0002 — worse than run 12's 0.0001.
+
+```
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0181      -17.4dB  ok
+        60    0.0006      -32.0dB  good
+       100    0.0005      -33.3dB  good
+       125    0.0004      -33.6dB  good
+       250    0.0003      -34.9dB  good
+       500    0.0002      -37.4dB  good
+       800    0.0001      -41.7dB  good
+      1000    0.0000      -43.7dB  good
+      2000    0.0000      -43.8dB  good
+      4000    0.0000      -44.3dB  good
+      8000    0.0000      -43.4dB  good
+     12000    0.0001      -42.2dB  good
+     16000    0.0001      -40.1dB  good
+     20000    0.0001      -43.0dB  good
+```
+
+Full comparison across all three warmup runs:
+
+| Freq | Run 11 (2048) | Run 12 (512) | Run 13 (256) |
+|------|--------------|-------------|-------------|
+| 20Hz | -24.9dB | -19.1dB | -17.4dB |
+| 60Hz | -35.0dB | -34.8dB | -32.0dB |
+| 250Hz | -41.3dB | -38.9dB | -34.9dB |
+| 500Hz | -42.8dB | -43.2dB | -37.4dB |
+| 1kHz | -43.2dB | -46.5dB | -43.7dB |
+| 8kHz | -43.9dB | -45.8dB | -43.4dB |
+| 16kHz | -45.0dB | -47.3dB | -40.1dB |
+
+The trend inverted. Run 12 (512) had better mid-high accuracy than run 11 because the shorter window forced faster convergence. Run 13 (256) undoes that gain: 60-500Hz is now worse than both previous runs, and 12-16kHz dropped noticeably. The window is now short enough that the GRU doesn't get enough audio context during training to learn the filter behavior reliably. 20Hz continued its decline to -17.4dB.
+
+Run 12 (warmup 512) was the sweet spot for this experiment series. Going shorter just degrades accuracy across the board.
+
+Not even bothering with trying this model. I was training it while I was testing the previous one. The previous one didn't work so this one won't either, as in it'll still click when using the shorter warmup size.
+
+
+## Next topics to research
+
+Definitely realistic:
+
+1. knob_to_h0 in the opcode — straightforward. The model is already trained with it (ref/09), the math is simple (tanh(W * cutoff + b)), and you just need to load those weights from JSON and overwrite RTNeural's GRU state pointer in init(). RTNeural is fine here — the knob_to_h0 layer runs in plain C++ outside the RTNeural inference loop.
+
+3. LSTM swap — trivial. RTNeural supports LSTM natively, same as GRU. One line change in the training script, one template change in the C++. Worth a run just to see the numbers.
+
+5. A-weighting pre-emphasis — a few lines in the training script. Zero inference impact, zero RTNeural involvement.
+
+2. Dynamic cutoff training data — realistic but a project of its own. The C++ generator already exists, you just need to add LFO modulation and log the per-sample cutoff value. The training script change is also manageable. RTNeural is not involved — the model architecture doesn't change.
+
+Less realistic / diminishing returns:
+
+4. FiLM conditioning — this is where RTNeural becomes a limitation. FiLM requires a secondary network feeding scale/shift factors into the feature maps between layers. That's not a sequential chain of native layers, so RTNeural's static graph can't represent it. You'd need custom C++ inference for the FiLM part, and for a single scalar knob, knob_to_h0 + dynamic training data probably gets you most of the way there for far less complexity. FiLM makes more sense for two or more parameters.
+
+6. Grey-box state matching — academically interesting, and RTNeural is actually fine for inference since the state-matching layer is discarded after training. But it requires modifying the C++ generator to output all four internal capacitor voltages at sample rate, and adding a learnable projection layer to the training pipeline. The payoff is better stability under heavy resonance and fast sweeps, which is real but speculative until you actually have the dynamic cutoff problem measured.

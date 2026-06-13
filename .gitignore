@@ -5,7 +5,6 @@ build/
 *.obj
 *.pdb
 *.tlog
-*.log
 *.idb
 *.ilk
 .vs/
@@ -31,3 +30,5 @@ audio/filteredOutput/
 
 # present from another branch, not tracked here
 vendor/csound/
+
+AnalogFilter/

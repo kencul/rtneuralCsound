@@ -124,3 +124,10 @@ The full development diary — every experiment, failure, breakthrough, and less
 - Csound opcode implementation (must-have for the conference paper)
 - Architecture sweet spot — 64 GRU units with `knob_to_h0` looks promising
 - Variable-parameter training data with sweeps and modulation
+
+
+## References
+
+https://medium.com/data-science/mini-neural-nets-for-guitar-effects-with-microcontrollers-ea9cdad2a29c
+
+https://github.com/jatinchowdhury18/RTNeural
