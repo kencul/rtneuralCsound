@@ -115,7 +115,7 @@ build/Release/moogGen.exe <input.wav>
 
 ## Model architecture
 
-The architecture is still being evaluated through ablation studies. The diagram below shows the base structure; unit count, LayerNorm, and knob_to_h0 are all variables under active experimentation. See DEVLOG.md for the full ablation results.
+The architecture is still being evaluated through ablation studies. The diagram below shows the base structure; unit count, LayerNorm, and knob_to_h0 are all variables under active experimentation. See [devlog/DEVLOG.md](devlog/DEVLOG.md) for the full ablation results.
 
 ```
 Input audio (1 sample) ──┐
@@ -135,7 +135,7 @@ An optional `knob_to_h0` layer seeds the GRU initial hidden state from the cutof
 
 ## DEVLOG
 
-The full development diary — every experiment, failure, breakthrough, and lesson learned — lives in [DEVLOG.md](DEVLOG.md). It starts with the TensorFlow baseline, covers the switch to PyTorch, GPU training, gradient explosions, windowed training with warmup, the Moog filter data pipeline, the parameterized model saga (including the infamous bad 16kHz training data), ablation studies, and the ongoing work toward the Csound opcode and dynamic parameter handling.
+The full development diary — every experiment, failure, breakthrough, and lesson learned — lives in [devlog/DEVLOG.md](devlog/DEVLOG.md). It starts with the TensorFlow baseline, covers the switch to PyTorch, GPU training, gradient explosions, windowed training with warmup, the Moog filter data pipeline, the parameterized model saga (including the infamous bad 16kHz training data), ablation studies, and the ongoing work toward the Csound opcode and dynamic parameter handling.
 
 ## Next steps
 
