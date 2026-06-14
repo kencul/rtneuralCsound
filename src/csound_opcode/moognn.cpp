@@ -10,9 +10,9 @@
 #include <string>
 #include <unordered_map>
 
-static constexpr float FREQ_MIN = 20.0f;
+static constexpr float FREQ_MIN = 100.0f;
 static constexpr float FREQ_MAX = 20000.0f;
-static constexpr float LOG_MIN = 2.99573227f; // log(20)
+static constexpr float LOG_MIN = 4.60517019f; // log(100)
 static constexpr float LOG_MAX = 9.90348755f; // log(20000)
 
 static float normalizeKnob(float freqHz) {

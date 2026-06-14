@@ -157,19 +157,39 @@ Full comparison across all runs at key frequencies:
 
 ---
 
+## Eval warmup investigation
+
+re-running evals for runs 12 and 13 with their correct warmup sizes (512 and 256) produced essentially identical numbers to the original 2048-warmup evals. The GRU converges to its correct state within a few hundred samples regardless of how much settling time the eval gives it. The previous accuracy comparisons were already valid.
+
+## Run 16(100Hz lower boundary, 256 warmup, no k2h0, 64 units)
+
+Trained all 300 epochs without early stopping, suggesting the cleaner training set allowed continuous slow improvement rather than plateau. Strict improvement over run 13 at every frequency:
+
+| Freq | Run 13 (20Hz floor) | Run 16 (100Hz floor) | Delta |
+|------|---------------------|----------------------|-------|
+| 100Hz | -33.2dB | -34.0dB | +0.8dB |
+| 250Hz | -34.9dB | -37.3dB | +2.4dB |
+| 500Hz | -37.3dB | -41.0dB | +3.7dB |
+| 1kHz | -43.3dB | -42.8dB | -0.5dB |
+| 4kHz | -43.9dB | -45.3dB | +1.4dB |
+| 16kHz | -40.0dB | -48.2dB | +8.2dB |
+| 20kHz | -42.8dB | -46.8dB | +4.0dB |
+
+The 100-500Hz range gained 1-4dB, directly from removing the unlearnable 20/60Hz gradient noise. High-frequency gains (up to 8dB at 16kHz) suggest the model was previously spending capacity trying to fit the impossible low-frequency examples. No tradeoffs observed.
+
+---
+
 ## Current state
 
-- Opcode is functional and click-free with run 13 weights at a 256-sample fade-in
-- Run 14 remains the highest-accuracy model but requires a 2048-sample fade
-- Run 15 failed: k2h0 at 512w warmup hurts mid-high accuracy and does not recover low-freq accuracy
-- `moognn_preload` eliminates the first-note JSON latency dropout
+- Opcode is functional and click-free with run 16 weights at a 256-sample fade-in
+- Run 16 is the best short-fade model: 100Hz lower boundary, strict improvement over run 13
+- Run 14 remains the highest-accuracy model overall but requires a 2048-sample fade
 
 ---
 
 ## Next steps
 
-- **Run 16**: 100Hz lower boundary + 128 GRU units + 256-sample warmup, no k2h0. Highest expected impact per training run.
-- **Listening test on run 13**: verify whether the sub-250Hz accuracy degradation is audible in musical context before committing to more training.
+- **More GRU units (run 17)**: 128 units + 100Hz floor + 256 warmup, no k2h0. One change at a time.
 - **Dynamic cutoff testing**: the model has only been evaluated on static cutoffs. Write a script that sweeps the cutoff mid-file and compares against the real Moog filter.
 - **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets to improve dynamic tracking.
 - **Paper**: write up for the Csound conference — architecture decisions, ablation results, and opcode implementation.

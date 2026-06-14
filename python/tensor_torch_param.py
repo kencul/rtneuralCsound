@@ -32,10 +32,10 @@ _log = open(os.path.join(OUT_DIR, "training.log"), "w")
 sys.stdout = _Tee(sys.__stdout__, _log)
 sys.stderr = _Tee(sys.__stderr__, _log)
 
-FREQ_MIN = 20.0
+FREQ_MIN = 100.0
 FREQ_MAX = 20000.0
 
-CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
+CUTOFF_FREQS = [100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
 
 
 def normalize_knob(freq_hz):
@@ -66,8 +66,6 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv = CausalConv1d(in_channels=1, out_channels=16, kernel_size=31)
-        self.norm = nn.LayerNorm(16)
-        self.knob_to_h0 = nn.Sequential(nn.Linear(1, GRU_HIDDEN), nn.Tanh())
         self.gru = nn.GRU(17, GRU_HIDDEN, batch_first=True)
         self.dense = nn.Linear(GRU_HIDDEN, 1)
 
@@ -79,20 +77,14 @@ class Model(nn.Module):
         conv_out = audio.permute(0, 2, 1)
         conv_out = self.conv(conv_out)
         conv_out = conv_out.permute(0, 2, 1)  # (batch, time, 16)
-        conv_out = self.norm(conv_out)
-
-        # Seed GRU hidden state from the knob value before processing the window.
-        # knob is constant across timesteps within a window, so we take index 0.
-        knob_val = knob[:, 0, :]                             # (batch, 1)
-        h0 = self.knob_to_h0(knob_val).unsqueeze(0)         # (1, batch, GRU_HIDDEN)
 
         gru_input = torch.cat([conv_out, knob], dim=-1)  # (batch, time, 17)
-        out, _ = self.gru(gru_input, h0)
+        out, _ = self.gru(gru_input)
         return self.dense(out) + audio  # skip connection: model learns residual
 
 
 window_size = 8192
-warmup_size = 512
+warmup_size = 128
 
 
 def load_conditioned_windows(dry_path, wet_path, knob_value_normalized, sr=None):

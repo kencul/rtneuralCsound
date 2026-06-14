@@ -4,15 +4,16 @@ import numpy as np
 import librosa
 import sys
 
-if len(sys.argv) != 2:
-    print(f"Usage: {sys.argv[0]} <model.pt>")
+if len(sys.argv) < 2:
+    print(f"Usage: {sys.argv[0]} <model.pt> [warmup_samples] [freq_min]")
     sys.exit(1)
 
-FREQ_MIN = 20.0
+FREQ_MIN = float(sys.argv[3]) if len(sys.argv) > 3 else 20.0
 FREQ_MAX = 20000.0
 GRU_HIDDEN = 64
 
-CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
+ALL_CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
+CUTOFF_FREQS = [f for f in ALL_CUTOFF_FREQS if f >= FREQ_MIN]
 
 MODEL_PATH  = sys.argv[1]
 DRY_PATH    = "audio/bench_mono.wav"
@@ -39,8 +40,6 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv = CausalConv1d(in_channels=1, out_channels=16, kernel_size=31)
-        self.norm = nn.LayerNorm(16)
-        self.knob_to_h0 = nn.Sequential(nn.Linear(1, GRU_HIDDEN), nn.Tanh())
         self.gru = nn.GRU(17, GRU_HIDDEN, batch_first=True)
         self.dense = nn.Linear(GRU_HIDDEN, 1)
 
@@ -51,11 +50,6 @@ class Model(nn.Module):
         conv_out = audio.permute(0, 2, 1)
         conv_out = self.conv(conv_out)
         conv_out = conv_out.permute(0, 2, 1)  # (batch, time, 16)
-        conv_out = self.norm(conv_out)
-
-        if h is None:
-            knob_val = knob[:, 0, :]
-            h = self.knob_to_h0(knob_val).unsqueeze(0)
 
         gru_input = torch.cat([conv_out, knob], dim=-1)
         out, h_out = self.gru(gru_input, h)
@@ -63,7 +57,7 @@ class Model(nn.Module):
 
 
 window_size = 8192
-warmup_size = 2048
+warmup_size = int(sys.argv[2]) if len(sys.argv) > 2 else 2048
 
 
 def run_model_on_audio(model, dry, knob_val, device):
