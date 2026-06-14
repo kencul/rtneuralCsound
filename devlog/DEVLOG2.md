@@ -106,19 +106,70 @@ This raises an open question: now that the fade-in is actually working, do the e
 
 ---
 
+## Phase 6: Re-testing runs 11 and 13 after fade-in bug fix
+
+With the `fade_counter` reset bug fixed, runs 11 and 13 (both without `knob_to_h0`) were re-tested via live MIDI.
+
+- **Run 11** (2048-sample training warmup, no k2h0): faint click audible under polyphonic load even at short fade durations, even at 256 samplees. The 2048-sample training warmup taught the GRU it would have a long convergence window, so it never learned to produce correct output quickly from a cold hidden state.
+- **Run 13** (256-sample training warmup, no k2h0): click-free at a 256-sample fade-in. The shorter warmup forced the model to converge fast from h0=0.
+
+**Conclusions:**
+
+Training warmup length is the primary factor controlling cold-start convergence speed, not `knob_to_h0`. A shorter training warmup implicitly trains the GRU to produce correct output from nearly the first sample.
+
+`knob_to_h0` was attempting to solve two problems at once: click suppression and accuracy. It didn't solve the click, but the click problem is better solved by shortening the training warmup. `knob_to_h0` and `LayerNorm` remain valuable for the ~10dB accuracy gain shown in the ablation (Phase 3), not for note-on behavior.
+
+Run 15 (k2h0 + LN + 512-sample warmup) was the intended next step under this reasoning. Its results are analyzed in Phase 7.
+
+---
+
+## Phase 7: Run 15 evaluation and warmup accuracy ceiling
+
+Run 15 trained cleanly: LR stepped down 4 times (1e-3 to 6.25e-5), early stopping at epoch 251, final val_loss 0.0001. Good convergence by training metrics. The eval results told a different story.
+
+Full comparison across all runs at key frequencies:
+
+| Freq | Run 11 (2048w) | Run 12 (512w) | Run 13 (256w) | Run 14 (2048w+k2h0) | Run 15 (512w+k2h0) |
+|------|---------------|--------------|--------------|--------------------|--------------------|
+| 20Hz | -24.9dB | -19.1dB | -17.4dB | -25.0dB | -14.8dB |
+| 100Hz | -38.6dB | -35.4dB | -33.3dB | -41.0dB | -30.8dB |
+| 500Hz | -42.8dB | -43.2dB | -37.4dB | -43.7dB | -38.9dB |
+| 1kHz | -43.2dB | -46.5dB | -43.7dB | -43.4dB | -42.9dB |
+| 12kHz | -44.9dB | -47.1dB | -42.2dB | -46.1dB | -40.9dB |
+| 20kHz | -46.5dB | -46.3dB | -43.0dB | -48.3dB | -42.0dB |
+
+**Three findings:**
+
+**Low-frequency accuracy is purely a warmup-length problem.** Runs 11 and 14 have the same 2048-sample warmup and nearly identical 20Hz accuracy (-24.9 vs -25.0dB), despite k2h0+LN giving 10dB gains at mid frequencies. k2h0 contributes nothing at 20Hz. The reason is geometric: at 48kHz a 20Hz signal has a 2400-sample period. A 256-sample warmup shows the GRU 0.11 periods; a 2048-sample warmup shows 0.85 periods. The model cannot fit what it cannot see.
+
+**k2h0 hurts at short warmup.** Run 12 (512w, no k2h0) reaches -46.5dB at 1kHz. Run 15 (512w, k2h0+LN) reaches only -42.9dB. The h0 seeding interferes with the convergence strategy the GRU would otherwise learn for a short warmup. k2h0 is only beneficial when the warmup is long enough to actually use the seeded state.
+
+**Run 12 is surprisingly strong.** With no k2h0 and only 512-sample warmup it beats run 11 (2048 warmup, no k2h0) at 1kHz and 12kHz. Shorter warmup training appears to encourage the model to learn more responsive mid-high representations.
+
+**The 256-sample constraint.** A 256-sample fade at 48kHz is ~5.3ms, which is imperceptible and does not affect note envelopes. This is the target fade-in. Run 13 achieves it and is click-free, but pays a significant accuracy penalty below 250Hz. The question is whether that penalty is audible in practice, and whether architecture changes can recover some of it.
+
+**Options considered:**
+
+- **Raise the lower frequency boundary to 100Hz**: the 20-60Hz training examples are unlearnable at 256 warmup and add gradient noise. Removing them would let the optimizer focus on frequencies it can fit, likely improving 100-250Hz accuracy as a side effect. Most musical material has fundamentals above 100Hz. Highest leverage, lowest effort.
+- **More GRU units (64 to 128)**: adds capacity everywhere but does not change the period-visibility ceiling. Worth combining with the boundary change rather than using alone.
+- **LSTM instead of GRU**: the separate cell state gives LSTM a slower-changing memory track that may accumulate warmup information more effectively. RTNeural supports it natively. Costs ~33% more inference compute at the same hidden size. Worth trying if the boundary change alone is insufficient.
+- **k2h0 at 256w**: ruled out by run 15 data.
+
+---
+
 ## Current state
 
-- Opcode is functional and click-free using run 14 weights with a 2048-sample fade-in
+- Opcode is functional and click-free with run 13 weights at a 256-sample fade-in
+- Run 14 remains the highest-accuracy model but requires a 2048-sample fade
+- Run 15 failed: k2h0 at 512w warmup hurts mid-high accuracy and does not recover low-freq accuracy
 - `moognn_preload` eliminates the first-note JSON latency dropout
-- The opcode has been tested in both file-playback and live MIDI contexts
-- Run 15 in progress, targeting a shorter fade-in while keeping k2h0 accuracy
 
 ---
 
 ## Next steps
 
-- **Re-test earlier models**: now that the fade-in bug is fixed, verify whether runs 11–13 (no k2h0) still click. If not, the architectural motivation for run 15 changes.
-- **Evaluate run 15**: does k2h0 + shorter warmup give a noticeably shorter fade-in compared to run 14?
+- **Run 16**: 100Hz lower boundary + 128 GRU units + 256-sample warmup, no k2h0. Highest expected impact per training run.
+- **Listening test on run 13**: verify whether the sub-250Hz accuracy degradation is audible in musical context before committing to more training.
 - **Dynamic cutoff testing**: the model has only been evaluated on static cutoffs. Write a script that sweeps the cutoff mid-file and compares against the real Moog filter.
 - **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets to improve dynamic tracking.
 - **Paper**: write up for the Csound conference — architecture decisions, ablation results, and opcode implementation.

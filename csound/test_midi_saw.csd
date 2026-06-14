@@ -8,7 +8,7 @@
 </CsOptions>
 <CsInstruments>
 sr = 48000
-ksmps = 256
+ksmps = 32
 nchnls = 1
 0dbfs = 1
 
@@ -17,7 +17,7 @@ gisaw    ftgen 3, 0, 1024, 7, 1, 512, 1, 0, -1, 512, -1
 massign 0, 1
 
 instr 99
-  iignore moognn_preload "ref/14_moog_20-20k_64u_k2h0_LN/weights.json"
+  iignore moognn_preload "ref/13_moog_warmup256/weights.json"
 endin
 
 instr 1
@@ -32,7 +32,7 @@ instr 1
   kcc = portk:k(kcc, 0.01)
   kcutoff  = 20 * pow(1000, kcc)
 
-  aout   moognn asaw, "ref/14_moog_20-20k_64u_k2h0_LN/weights.json", kcutoff
+  aout   moognn asaw, "ref/13_moog_warmup256/weights.json", kcutoff
   out aout
 endin
 
