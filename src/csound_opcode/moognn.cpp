@@ -116,24 +116,6 @@ struct MoogNN : csnd::Plugin<1, 3> {
 
         float knob_val = normalizeKnob((float)inargs[2]);
 
-        // Prime CPU caches by running silence through the full inference path.
-        // Without this, the first aperf() call hits cold Eigen matrix cache misses
-        // that can push it over the kperiod budget.
-        {
-            float zero[1]   = {0.0f};
-            float gruIn[17] = {};
-            gruIn[16] = knob_val;
-            model->conv.reset();
-            model->rec.reset();
-            for (int s = 0; s < 64; s++) {
-                model->conv.forward(zero);
-                std::copy(model->conv.getOutputs(), model->conv.getOutputs() + 16, gruIn);
-                model->norm.apply(gruIn);
-                gruIn[16] = knob_val;
-                model->rec.forward(gruIn);
-            }
-        }
-
         // Reset to clean state and seed h0 so real audio starts correctly.
         model->conv.reset();
         model->rec.reset();

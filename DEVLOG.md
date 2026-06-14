@@ -1372,6 +1372,12 @@ Hit a segfault on first attempt. The opcode was declared as `Plugin<0, 1>` (zero
 
 My main question now is that since the clicks were cause by a bug that made the fade in not work properly, maybe the previous models would work fine?
 
+## CPU cache warmup loop removal
+
+`init()` had a 64-sample silence loop before the h0 seed. The reasoning was that cold Eigen matrix cache misses on the first `aperf()` call could spike latency above the k-period budget. This was added as a precaution before the real click causes were found.
+
+Added first-aperf timing to measure it properly. With the loop: 0.47ms, 0.42ms. Without: 0.37ms, 0.50ms, 0.38ms, 0.38ms, 0.40ms. No difference, all within normal jitter. The loop also reset the model state immediately after, so it had zero effect on audio. Removed.
+
 ## Run 15: k2h0 with 512 warmup samples
 
 Running a training while i experiment with run 14 with 512 warmup samples. If this model works well, ideally bring it down to 256 samples next.

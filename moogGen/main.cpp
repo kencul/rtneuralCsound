@@ -3,8 +3,8 @@
 #include <vector>
 #include <string>
 
-#include "example/helpers.hpp"
-#include "src/RKSimulationModel.h"
+#include "wav_utils.hpp"
+#include "../vendor/MoogLadders/src/RKSimulationModel.h"
 
 int main(int argc, char* argv[]) {
     std::string inputFile;
