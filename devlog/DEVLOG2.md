@@ -123,7 +123,7 @@ Run 15 (k2h0 + LN + 512-sample warmup) was the intended next step under this rea
 
 ---
 
-## Phase 7: Run 15 evaluation and warmup accuracy ceiling
+## Run 15 evaluation and warmup accuracy ceiling
 
 Run 15 trained cleanly: LR stepped down 4 times (1e-3 to 6.25e-5), early stopping at epoch 251, final val_loss 0.0001. Good convergence by training metrics. The eval results told a different story.
 
@@ -177,19 +177,38 @@ Trained all 300 epochs without early stopping, suggesting the cleaner training s
 
 The 100-500Hz range gained 1-4dB, directly from removing the unlearnable 20/60Hz gradient noise. High-frequency gains (up to 8dB at 16kHz) suggest the model was previously spending capacity trying to fit the impossible low-frequency examples. No tradeoffs observed.
 
+
+## Run 17 (128-sample warmup)
+
+Run 17 tested whether the warmup could be halved again: 128 samples, 100Hz floor, 64 units, no k2h0. Result: a clear step backwards from run 16, across the entire frequency range.
+
+| Freq | Run 16 (256w) | Run 17 (128w) | Delta |
+|------|--------------|--------------|-------|
+| 100Hz | -34.0dB | -26.4dB | -7.6dB |
+| 250Hz | -37.3dB | -34.9dB | -2.4dB |
+| 500Hz | -41.0dB | -38.0dB | -3.0dB |
+| 1kHz | -42.8dB | -39.1dB | -3.7dB |
+| 4kHz | -45.3dB | -40.3dB | -5.0dB |
+| 20kHz | -46.8dB | -41.9dB | -4.9dB |
+
+Unlike previous warmup reductions where damage was concentrated at low frequencies, run 17 degraded everywhere. The training confirmed the problem: best val_loss was 0.0003 vs 0.0001 for run 16, and the LR scheduler stepped down 6 times (to 1.56e-05) without reaching convergence. At 128 samples the GRU sees only 0.27 periods of a 100Hz signal, below the threshold where it can represent the filter state at all. This is a geometric constraint, not an optimization one. k2h0 and LSTM are unlikely to help here for the same reason.
+
+**256-sample warmup is the floor for the 100Hz lower boundary.** Run 16 is the best short-fade model. Next steps: try more units or LSTM at 256 warmup.
+
 ---
 
 ## Current state
 
 - Opcode is functional and click-free with run 16 weights at a 256-sample fade-in
-- Run 16 is the best short-fade model: 100Hz lower boundary, strict improvement over run 13
+- Run 16 is the best short-fade model: 100Hz lower boundary, 256 warmup, strict improvement over run 13
 - Run 14 remains the highest-accuracy model overall but requires a 2048-sample fade
 
 ---
 
 ## Next steps
 
-- **More GRU units (run 17)**: 128 units + 100Hz floor + 256 warmup, no k2h0. One change at a time.
+- **Run 18**: LSTM instead of GRU at 256 warmup + 100Hz floor, same hidden size. Most interesting architectural variable remaining.
+- **Run 19 (if needed)**: 128 GRU units at 256 warmup + 100Hz floor. More capacity, same architecture.
 - **Dynamic cutoff testing**: the model has only been evaluated on static cutoffs. Write a script that sweeps the cutoff mid-file and compares against the real Moog filter.
 - **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets to improve dynamic tracking.
 - **Paper**: write up for the Csound conference — architecture decisions, ablation results, and opcode implementation.

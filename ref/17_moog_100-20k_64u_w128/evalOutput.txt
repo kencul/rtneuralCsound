@@ -1,0 +1,17 @@
+$ python python/eval_param_model.py ref/17_moog_100-20k_64u_w128/best_model.pt 128 100
+Using device: cuda
+
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+       100    0.0023      -26.4dB  good
+       125    0.0012      -29.2dB  good
+       250    0.0003      -34.9dB  good
+       500    0.0002      -38.0dB  good
+       800    0.0001      -38.6dB  good
+      1000    0.0001      -39.1dB  good
+      2000    0.0001      -39.4dB  good
+      4000    0.0001      -40.3dB  good
+      8000    0.0001      -43.0dB  good
+     12000    0.0000      -43.5dB  good
+     16000    0.0000      -45.1dB  good
+     20000    0.0001      -41.9dB  good
