@@ -60,7 +60,7 @@ class CausalConv1d(nn.Module):
         return self.conv(x)
 
 
-GRU_HIDDEN = 64
+GRU_HIDDEN = 256
 
 class Model(nn.Module):
     def __init__(self):
@@ -84,7 +84,7 @@ class Model(nn.Module):
 
 
 window_size = 8192
-warmup_size = 128
+warmup_size = 256
 
 
 def load_conditioned_windows(dry_path, wet_path, knob_value_normalized, sr=None):

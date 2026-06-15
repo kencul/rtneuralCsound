@@ -197,18 +197,60 @@ Unlike previous warmup reductions where damage was concentrated at low frequenci
 
 ---
 
+## Run 18 (LSTM)
+
+Swapped GRU for LSTM, same config as run 16 (64 units, 256 warmup, 100Hz floor). LSTM was worse at every frequency, by a lot.
+
+| Freq | Run 16 (GRU) | Run 18 (LSTM) | Delta |
+|------|-------------|--------------|-------|
+| 100Hz | -34.0dB | -26.8dB | -7.2dB |
+| 500Hz | -41.0dB | -34.3dB | -6.7dB |
+| 1kHz | -42.8dB | -34.8dB | -8.0dB |
+| 4kHz | -45.3dB | -38.4dB | -6.9dB |
+| 20kHz | -46.8dB | -45.2dB | -1.6dB |
+
+Training reached val_loss 0.0001 and ran all 300 epochs without early stopping, so it was still slowly improving at the end. LSTM has ~33% more parameters than GRU at the same hidden size, and those extra parameters didn't have enough epochs to converge. GRU fits the data more efficiently within the 300-epoch budget. LSTM is not ruled out permanently but GRU is the right call for now.
+
+---
+
+## Run 19 (128 GRU units)
+
+Doubled the GRU hidden size to 128, same config as run 16 (256 warmup, 100Hz floor, no k2h0). Clear winner.
+
+| Freq | Run 16 (64u) | Run 19 (128u) | Delta |
+|------|-------------|--------------|-------|
+| 100Hz | -34.0dB | -34.7dB | +0.7dB |
+| 250Hz | -37.3dB | -41.9dB | +4.6dB |
+| 500Hz | -41.0dB | -45.8dB | +4.8dB |
+| 1kHz | -42.8dB | -46.7dB | +3.9dB |
+| 12kHz | -45.7dB | -50.2dB | +4.5dB |
+| 16kHz | -48.2dB | -53.7dB | +5.5dB |
+| 20kHz | -46.8dB | -52.6dB | +5.8dB |
+
+2-6dB gains across the whole range. High frequencies now exceed -50dB, approaching the inaudible threshold from Phase 1. 100Hz barely moved (+0.7dB) as expected since that is still a warmup period-visibility constraint, not a capacity one.
+
+Run 19 also beats run 14 (the long-warmup k2h0 model) from 500Hz upward, despite the shorter warmup and higher frequency floor. Run 14 only wins below 100Hz where run 19 has no coverage.
+
+Training converged cleanly: early stopping at epoch 279, val_loss 0.0001. Epoch time ~12s vs ~8s for 64-unit runs, total 53 minutes.
+
+## Incomplete run 20 (256 GRU units)
+
+Each epoch was taking around 102 seconds, which is just how GRU units scale. This will take 12 hours ish, going now.
+
+---
+
 ## Current state
 
-- Opcode is functional and click-free with run 16 weights at a 256-sample fade-in
-- Run 16 is the best short-fade model: 100Hz lower boundary, 256 warmup, strict improvement over run 13
-- Run 14 remains the highest-accuracy model overall but requires a 2048-sample fade
+- Run 19 (128 GRU units, 256 warmup, 100Hz floor) is the best short-fade model by a wide margin
+- Run 19 beats run 14 from 500Hz upward despite a much shorter warmup
+- Run 14 still has better coverage below 100Hz
 
 ---
 
 ## Next steps
 
-- **Run 18**: LSTM instead of GRU at 256 warmup + 100Hz floor, same hidden size. Most interesting architectural variable remaining.
-- **Run 19 (if needed)**: 128 GRU units at 256 warmup + 100Hz floor. More capacity, same architecture.
+- **Deploy run 19**: update the opcode to support 128 GRU units and test click behavior.
+- **Consider 256 units**: run 19 still has room at 100-250Hz. Diminishing returns likely but worth one test.
 - **Dynamic cutoff testing**: the model has only been evaluated on static cutoffs. Write a script that sweeps the cutoff mid-file and compares against the real Moog filter.
 - **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets to improve dynamic tracking.
 - **Paper**: write up for the Csound conference — architecture decisions, ablation results, and opcode implementation.
