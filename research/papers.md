@@ -275,3 +275,10 @@ Relevance: A gray-box alternative to the fully black-box RNN approach used in th
 - **Anti-aliasing cluster (Köper 2023/entry 17, Carson 2025/entry 18, Esqueda 2025/entry 19, Sato 2025/entry 20)** covers the aliasing problem for distortion from four angles: ADAA integration, teacher-student fine-tuning, LRU architecture, and activation smoothing.
 - **ToneTwist AFx (entry 21)** is the training data source for future distortion work.
 - **Differentiable Moog (entry 22)** is the gray-box contrast to the black-box approach taken here.
+
+
+https://nva.sikt.no/registration/0198cc80a594-816602e1-c533-4d70-a45e-a0b8606fa3d0
+Max msp program for collecting data with dynamic params
+
+https://www.dafx.de/paper-archive/2023/DAFx23_paper_14.pdf
+KORG paper for realLRU
