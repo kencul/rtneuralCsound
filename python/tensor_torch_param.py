@@ -32,10 +32,10 @@ _log = open(os.path.join(OUT_DIR, "training.log"), "w")
 sys.stdout = _Tee(sys.__stdout__, _log)
 sys.stderr = _Tee(sys.__stderr__, _log)
 
-FREQ_MIN = 20.0
+FREQ_MIN = 100.0
 FREQ_MAX = 20000.0
 
-CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
+CUTOFF_FREQS = [100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
 
 
 def normalize_knob(freq_hz):
@@ -60,7 +60,7 @@ class CausalConv1d(nn.Module):
         return self.conv(x)
 
 
-GRU_HIDDEN = 64
+GRU_HIDDEN = 256
 
 class Model(nn.Module):
     def __init__(self):

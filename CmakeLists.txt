@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 project(rtneuralCsound VERSION 0.1.0)
 
+set(RTNEURAL_XSIMD ON CACHE BOOL "Use xsimd backend for RTNeural" FORCE)
+set(RTNEURAL_USE_AVX ON CACHE BOOL "Enable AVX2 for RTNeural" FORCE)
 add_subdirectory(vendor/RTNeural)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -15,6 +17,13 @@ endfunction()
 add_tool(process_wav)
 add_tool(process_wav_torch)
 add_tool(process_wav_torch_param)
+
+add_executable(moogGen moogGen/main.cpp)
+target_include_directories(moogGen PRIVATE
+    ${CMAKE_SOURCE_DIR}/vendor/MoogLadders/src
+    ${CMAKE_SOURCE_DIR}/moogGen
+)
+target_compile_features(moogGen PRIVATE cxx_std_17)
 
 # Use headers from the installed Csound to ensure struct layout matches the binary.
 # The DLL must be compiled against the same Csound version it will run with. 

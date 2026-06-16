@@ -4,15 +4,16 @@ import numpy as np
 import librosa
 import sys
 
-if len(sys.argv) != 2:
-    print(f"Usage: {sys.argv[0]} <model.pt>")
+if len(sys.argv) < 2:
+    print(f"Usage: {sys.argv[0]} <model.pt> [warmup_samples] [freq_min]")
     sys.exit(1)
 
-FREQ_MIN = 20.0
+FREQ_MIN = float(sys.argv[3]) if len(sys.argv) > 3 else 20.0
 FREQ_MAX = 20000.0
-GRU_HIDDEN = 64
+GRU_HIDDEN = 256
 
-CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
+ALL_CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
+CUTOFF_FREQS = [f for f in ALL_CUTOFF_FREQS if f >= FREQ_MIN]
 
 MODEL_PATH  = sys.argv[1]
 DRY_PATH    = "audio/bench_mono.wav"
@@ -56,7 +57,7 @@ class Model(nn.Module):
 
 
 window_size = 8192
-warmup_size = 2048
+warmup_size = int(sys.argv[2]) if len(sys.argv) > 2 else 2048
 
 
 def run_model_on_audio(model, dry, knob_val, device):

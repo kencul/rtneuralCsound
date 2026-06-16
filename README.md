@@ -1,8 +1,8 @@
 # rtneuralCsound
 
-Research into neural network audio effect modeling using RTNeural, working toward a Csound opcode implementation. Trains models that can simulate analog filters (particularly Moog ladder filters) with real-time controllable parameters — cutoff frequency, resonance, etc.
+Research into neural network audio effect modeling using RTNeural, working toward a Csound opcode implementation. Trains models that can simulate analog filters (particularly Moog ladder filters) with real-time controllable parameters: cutoff frequency, resonance, etc.
 
-Currently the project can train a Conv1d→GRU→Dense neural network (with skip connection and optional `knob_to_h0` seeding) to model a 4-pole Moog low-pass filter. The trained model runs as a C++ inference tool on WAV files, and work is in progress toward a real-time Csound opcode.
+Currently the project can train a Conv1d→GRU→Dense neural network (with skip connection and optional `knob_to_h0` seeding) to model a 4-pole Moog low-pass filter. The trained model runs as a C++ inference tool on WAV files, and as a real-time Csound opcode plugin.
 
 ## Repo layout
 
@@ -15,12 +15,21 @@ Currently the project can train a Conv1d→GRU→Dense neural network (with skip
 │   ├── eval_param_model.py      # Evaluate a trained model across cutoff frequencies
 │   └── compareSpectrum.py       # Spectrogram comparison tool
 ├── ref/                # Archived trained models by version
-├── src/                # C++ inference tools
+├── research/           # Notes and paper references
+├── src/                # C++ source
+│   ├── csound_opcode/            # Csound plugin opcode (moognn.dll)
 │   ├── process_wav/              # RTNeural JSON model (legacy)
 │   ├── process_wav_torch/        # PyTorch model, stereo
 │   └── process_wav_torch_param/  # PyTorch model with cutoff parameter
+├── csound/             # Csound test scripts
+│   ├── test_passthrough.csd  # File playback through opcode
+│   └── test_midi_saw.csd     # Live MIDI with CC-controlled cutoff
 ├── vendor/             # Dependencies
-│   ├── RTNeural/       # Git submodule — real-time neural network inference
+│   ├── MoogLadders/    # Moog ladder filter implementations (third-party)
+│   │   ├── src/        # Filter model headers
+│   │   └── example/    # Example files from the MoogLadders repo
+│   ├── RTNeural/       # Git submodule -- real-time neural network inference
+│   ├── csound/         # Git submodule -- Csound headers for opcode build
 │   └── dr_wav.h        # Single-header WAV reader/writer
 ├── CMakeLists.txt
 └── requirements.txt
@@ -28,11 +37,12 @@ Currently the project can train a Conv1d→GRU→Dense neural network (with skip
 
 ## Dependencies
 
-C++ build uses two vendored libraries in `vendor/`:
+C++ build uses vendored libraries in `vendor/`:
 
-- **RTNeural** (`vendor/RTNeural/`): real-time neural network inference. Git submodule, initialize with `git submodule update --init`.
-- **dr_wav** (`vendor/dr_wav.h`): single-header WAV reader/writer.
-- **moog_ladders** (`moogGen/src` and `moogGen/example`): collection of Moog ladder filter implementations used for generating training data.
+- **RTNeural** (`vendor/RTNeural/`): real-time neural network inference. Git submodule. [RTNeural Github](https://github.com/jatinchowdhury18/RTNeural)
+- **csound** (`vendor/csound/`): Csound source, used only for headers when building the opcode plugin. Git submodule. Note: this is a large repo (~500MB). [Csound Github](https://github.com/csound/csound)
+- **dr_wav** (`vendor/dr_wav.h`): single-header WAV reader/writer. [dr_wav.h in dr_libs repo](https://github.com/mackron/dr_libs/blob/master/dr_wav.h )
+- **MoogLadders** (`vendor/MoogLadders/`): collection of Moog ladder filter implementations. `moogGen` uses `RKSimulationModel` from `src/` for generating training data. [MoogLadders Github](https://github.com/ddiakopoulos/MoogLadders)
 
 ## Build
 
@@ -43,6 +53,15 @@ cmake --build build --config Release
 ```
 
 Binaries output to `build/bin/Release/`.
+
+To build only the Csound opcode DLL:
+
+```bash
+cmake --build build --config Release --target moognn
+# output: build/bin/Release/moognn.dll
+```
+
+The opcode is loaded at runtime by Csound via `--opcode-lib=build/bin/Release/moognn.dll`. To install permanently, copy `moognn.dll` to `C:/Program Files/Csound7/plugins64/`.
 
 ## Usage
 
@@ -96,7 +115,7 @@ build/Release/moogGen.exe <input.wav>
 
 ## Model architecture
 
-The current parameterized model architecture (fully native to RTNeural):
+The architecture is still being evaluated through ablation studies. The diagram below shows the base structure; unit count, LayerNorm, and knob_to_h0 are all variables under active experimentation. See [devlog/DEVLOG.md](devlog/DEVLOG.md) for the full ablation results.
 
 ```
 Input audio (1 sample) ──┐
@@ -116,14 +135,15 @@ An optional `knob_to_h0` layer seeds the GRU initial hidden state from the cutof
 
 ## DEVLOG
 
-The full development diary — every experiment, failure, breakthrough, and lesson learned — lives in [DEVLOG.md](DEVLOG.md). It starts with the TensorFlow baseline, covers the switch to PyTorch, GPU training, gradient explosions, windowed training with warmup, the Moog filter data pipeline, the parameterized model saga (including the infamous bad 16kHz training data), ablation studies, and the ongoing work toward the Csound opcode and dynamic parameter handling.
+The full development diary — every experiment, failure, breakthrough, and lesson learned — lives in [devlog/DEVLOG.md](devlog/DEVLOG.md). It starts with the TensorFlow baseline, covers the switch to PyTorch, GPU training, gradient explosions, windowed training with warmup, the Moog filter data pipeline, the parameterized model saga (including the infamous bad 16kHz training data), ablation studies, and the ongoing work toward the Csound opcode and dynamic parameter handling.
 
 ## Next steps
 
-- Dynamic cutoff testing — the model has only been evaluated on static cutoffs so far
-- Csound opcode implementation (must-have for the conference paper)
-- Architecture sweet spot — 64 GRU units with `knob_to_h0` looks promising
+- Dynamic cutoff testing -- the model has only been evaluated on static cutoffs so far
+- ~~Csound opcode implementation (must-have for the conference paper)~~ -- done, see `src/csound_opcode/`
+- ~~Architecture sweet spot -- 64 GRU units with `knob_to_h0`~~ -- trained (run 14), ablation complete
 - Variable-parameter training data with sweeps and modulation
+- Fix per-note click on cold start without an always-on send effect workaround
 
 
 ## References

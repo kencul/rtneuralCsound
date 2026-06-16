@@ -8,13 +8,17 @@
 </CsOptions>
 <CsInstruments>
 sr = 48000
-ksmps = 64
+ksmps = 32
 nchnls = 1
 0dbfs = 1
 
 gisaw    ftgen 3, 0, 1024, 7, 1, 512, 1, 0, -1, 512, -1
 
 massign 0, 1
+
+instr 99
+  iignore moognn_preload "ref/19_moog_100-20k_128u_w256/weights.json"
+endin
 
 instr 1
   ifreq  cpsmidi
@@ -28,12 +32,13 @@ instr 1
   kcc = portk:k(kcc, 0.01)
   kcutoff  = 20 * pow(1000, kcc)
 
-  aout   moognn asaw, "ref/12_moog_warmup512/weights.json", kcutoff
-         out aout
+  aout   moognn asaw, "ref/19_moog_100-20k_128u_w256/weights.json", kcutoff
+  out aout
 endin
 
 </CsInstruments>
 <CsScore>
+i 99 0 0
 f 0 3600
 </CsScore>
 </CsoundSynthesizer>

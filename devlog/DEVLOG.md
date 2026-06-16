@@ -1243,21 +1243,141 @@ Run 12 (warmup 512) was the sweet spot for this experiment series. Going shorter
 
 Not even bothering with trying this model. I was training it while I was testing the previous one. The previous one didn't work so this one won't either, as in it'll still click when using the shorter warmup size.
 
+## Research results
 
-## Next topics to research
+Did some research to see if any previous literature could guide me on what to do.
 
-Definitely realistic:
+In regard to the cold start issue, there are many different approaches. Firstly, it has been refered to as "Exposure bias", where the GRU was trained on ground-truth hidden states, but runs on its own imperfect state at inference. TBPTT is the standard mitigation (what the warmup is a variation of), and state-matching is the next step (what k2h0 is). Techniques like HyperRNN do what knob_to_h0 do at init time during inference. FiLM is a more standard approach, where instead of generating weights like HyperRNN directly, it calculates scale and shifts that is applied to the feature activations. It has been found that placementof FiLM matters, and post-GRU and before Dense is the best.
 
-1. knob_to_h0 in the opcode — straightforward. The model is already trained with it (ref/09), the math is simple (tanh(W * cutoff + b)), and you just need to load those weights from JSON and overwrite RTNeural's GRU state pointer in init(). RTNeural is fine here — the knob_to_h0 layer runs in plain C++ outside the RTNeural inference loop.
+Though FiLM is super light weight, it seems slightly overkill for this situation. For a single scalar knob, knob_to_h0 would be sufficient, and it won't disrupt the native RTNeural. However, I should consider adding it, as it conditions the GRU output at every sample, so it would help with dynamic parameter tracking.
 
-3. LSTM swap — trivial. RTNeural supports LSTM natively, same as GRU. One line change in the training script, one template change in the C++. Worth a run just to see the numbers.
+So first, I will add k2h0 first to try to solve the cold start click, then add FiLM to better handle dynamic parameters and multiple parameters in the future.
 
-5. A-weighting pre-emphasis — a few lines in the training script. Zero inference impact, zero RTNeural involvement.
+I also researched how to best get training data. For automated, digital methods, adjusting parameters with an lfo seems standard. Instead of multiple values, you can collect data with each parameter at different lfo freqs from 1-20hz.
 
-2. Dynamic cutoff training data — realistic but a project of its own. The C++ generator already exists, you just need to add LFO modulation and log the per-sample cutoff value. The training script change is also manageable. RTNeural is not involved — the model architecture doesn't change.
+For analog systems, setting each param at 3-5 points and manually recording all combinations still seems to be sufficient.
 
-Less realistic / diminishing returns:
+The sound source is sine sweeps, white noise of different decibel levels, sine tones of different dB levels, music excerpts of different levels. The processes were varied between papers. No real consistent approach that I should follow, mainly targetting the effect that is being simulated (long gaps for reverbs, different decibels for compressions and distortions etc.).
 
-4. FiLM conditioning — this is where RTNeural becomes a limitation. FiLM requires a secondary network feeding scale/shift factors into the feature maps between layers. That's not a sequential chain of native layers, so RTNeural's static graph can't represent it. You'd need custom C++ inference for the FiLM part, and for a single scalar knob, knob_to_h0 + dynamic training data probably gets you most of the way there for far less complexity. FiLM makes more sense for two or more parameters.
+Most literature agrees that LTSM and GRU are the best type of RNN for stateful effects. Some long history related effects like compressions that have 5 second attacks need to do creative architectures to handle longer memory, but won't be relevant for moog filters and distortions.
 
-6. Grey-box state matching — academically interesting, and RTNeural is actually fine for inference since the state-matching layer is discarded after training. But it requires modifying the C++ generator to output all four internal capacitor voltages at sample rate, and adding a learnable projection layer to the training pipeline. The payoff is better stability under heavy resonance and fast sweeps, which is real but speculative until you actually have the dynamic cutoff problem measured.
+Also consider aliasing, especially for distortions. Antiderivative Antialiasing (ADAA) has become standard in the industry.
+
+Consider teacher student models for simplification of the model to improve realtime performance. Can also help with anti aliasing.
+
+Keep in mind sample rate. When a model is trained at a sample rate, it doesn't perform correctly in other sample rates at inference. There are solutions, but just note if it isn't mitigated.
+
+There is a chirp-train metric that specifically measures how well a model tracks a sweeping parameter. This would provide a principled way to score a model's ability to handle dynamic parameters.
+
+## Run 14: 64-unit model with knob_to_h0 and LayerNorm
+
+Architecture: `Conv1d → LayerNorm → (concat knob) → GRU(17→64) → Dense(64→1) + skip`, with `knob_to_h0: Linear(1→64) + Tanh` seeding the GRU hidden state before each window. This restores both components from the ablation study and brings them together in the 64-unit configuration that the ablation suggested as the sweet spot.
+
+Training ran the full 300 epochs in 52.2 minutes (~10.4s/epoch). The LR stepped 4 times: 1e-3 → 5e-4 at epoch 99, → 2.5e-4 at epoch 146, → 1.25e-4 at epoch 170, → 6.25e-5 at epoch 226. The val_loss dropped rapidly from 0.319 at epoch 1 to 0.0025 by epoch 23, then refined through the remaining LR steps before holding flat at 0.0001 from epoch 147 onward. Best val_loss: 0.0001.
+
+Notable in the early training: epoch 1 had a train loss of 36.05, a gradient explosion on the first batch before clipping stabilised it. By epoch 2 it was already 0.35. This is normal for k2h0 at LR 1e-3 — the h0 seeding creates a sharp gradient signal initially.
+
+```bash
+$ python python/eval_param_model.py ref/14_moog_20-20k_64u_k2h0_LN/best_model.pt
+Using device: cuda
+
+ Freq (Hz)       ESR    ESR (dB)  Status
+---------------------------------------------
+        20    0.0032      -25.0dB  good
+        60    0.0002      -36.6dB  good
+       100    0.0001      -41.0dB  good
+       125    0.0001      -41.8dB  good
+       250    0.0001      -42.3dB  good
+       500    0.0000      -43.7dB  good
+       800    0.0000      -43.6dB  good
+      1000    0.0000      -43.4dB  good
+      2000    0.0001      -42.9dB  good
+      4000    0.0000      -45.2dB  good
+      8000    0.0000      -44.5dB  good
+     12000    0.0000      -46.1dB  good
+     16000    0.0000      -47.2dB  good
+     20000    0.0000      -48.3dB  good
+```
+
+Comparing against the two most relevant prior runs:
+
+| Freq | 32u + k2h0 + LN (run 09) | 64u no k2h0 no LN (run 11) | 64u + k2h0 + LN (run 14) |
+|------|--------------------------|----------------------------|--------------------------|
+| 20Hz | -27.5dB | -24.9dB | -25.0dB |
+| 60Hz | -40.9dB | -35.0dB | -36.6dB |
+| 500Hz | -48.6dB | -42.8dB | -43.7dB |
+| 1kHz | -48.9dB | -43.2dB | -43.4dB |
+| 8kHz | -48.1dB | -43.9dB | -44.5dB |
+| 20kHz | — | -46.5dB | -48.3dB |
+
+Run 14 is consistently 1–2dB better than run 11 across the board, and the high-frequency ceiling improved notably (−48.3dB at 20kHz vs −46.5dB). The mid-frequency scores are still behind the 32-unit run 09, which is counterintuitive given more units. The most likely explanation is the skip connection: run 09 didn't have it. Without the skip, the GRU had to model the full output signal, forcing more of the filter behavior into the GRU hidden state. With the skip connection, the model only needs to learn the residual, which reduces the pressure on the GRU to internalize the filter state — leaving less for k2h0 to leverage at low-mid frequencies.
+
+The practical primary goal for this run wasn't raw accuracy — it was fixing the per-note click in the opcode. k2h0 seeds the GRU into the correct filter state before any audio arrives, so the cold-start problem that required a 2048-sample fade should be resolved. The next step is updating `moognn.cpp` to load and apply the k2h0 and LayerNorm weights.
+
+## Opcode update: k2h0 and LayerNorm
+
+Updated `moognn.cpp` to match the run 14 architecture. Added manual `LayerNorm` and `KnobToH0` structs (RTNeural has no native support for either). `init()` now loads `norm.weight/bias` and `knob_to_h0.0.weight/bias` from the JSON, resets conv and rec, then seeds `model->rec.get<0>().outs[]` from k2h0 before any audio arrives. `aperf()` applies LayerNorm between the conv copy and the GRU concat step.
+
+Also added a 2048-sample fade-in on note-on. Even with k2h0 seeding the GRU correctly, the model was trained with a 2048-sample warmup before loss was computed, so it isn't guaranteed to produce accurate output from sample 0. The fade hides that convergence window.
+
+Still clicking on note-on. Bypassing the opcode removes the click.
+
+## Click debugging
+
+Worked through several hypotheses to find the cause.
+
+Added timing to `init()` to measure each section. Came back as `total=0.34ms` on the second note and beyond (JSON already cached). Far under the 1.33ms budget at ksmps=64/48kHz. Not the cause for those notes.
+
+Added a cache warmup to `init()`: run one ksmps block of silence through the full inference path (conv + LayerNorm + GRU + Dense), then reset and re-seed h0. Idea was that cold Eigen matrix cache misses might spike the first `aperf()` call. Added first-aperf timing to confirm: `0.09ms`. Not the cause.
+
+Added NaN/Inf detection on the first aperf output. Nothing reported. Ruled out NaN propagating through the fade (NaN * 0 = NaN by IEEE 754, which would bypass the fade).
+
+Increasing ksmps from 64 to 256 didn't change anything.
+
+Root cause found: on the first note of a session, before the JSON cache is populated, init prints `json=7.53ms, total=7.84ms`. This blows past the 1.33ms ksmps budget, causing a dropout that manifests as a click. Every subsequent note is `total=0.34ms` (cached) and click-free. ksmps=256 doesn't help because its budget is 5.33ms, still under 7.84ms.
+
+Fix: pre-populate the JSON cache before any MIDI notes arrive. Can be done with a dummy instrument at score time 0 that instantiates the opcode once.
+
+## Per-note click fix
+
+The click debugging section concluded that subsequent notes were click-free, but that was wrong. The click was actually happening on every note from the third one onward, just masked during initial testing.
+
+Added result-value logging to aperf() to print `raw`, `fade`, and `out` for the first 20 samples of a note's first aperf call. Playing the first two notes showed clean output: raw values around -0.12 to +0.15, faded output near zero. No transients.
+
+Playing note 3 showed nothing at all. No s0-s19 lines. The `is_first` flag (`fade_counter == 0`) was never true, meaning aperf was running with fade_counter already at 2048 and the fade was at 1.0 from sample 0: full volume, no ramp, instant click.
+
+Root cause: Csound reuses instrument memory blocks between notes without calling C++ constructors. The struct's default member initializer (`fade_counter = 0`) only runs at construction time. When note 1 ends and its memory is returned to Csound's pool, `fade_counter` is still sitting at 2048. When note 3 starts and gets that same memory, `fade_counter = 2048` and the entire fade is skipped.
+
+Fix: explicitly reset `fade_counter = 0` at the top of `init()`. One line.
+
+The first-note click from the 7.84ms JSON parse is still a separate unresolved issue.
+
+## First-note JSON cache fix
+
+Added a `moognn_preload` opcode to pre-warm the JSON cache before any MIDI notes arrive. It's i-rate only, takes a path string, and just does the JSON parse and cache insertion. No model allocation, no weight loading.
+
+```csound
+instr 99
+  iignore moognn_preload "ref/14_moog_20-20k_64u_k2h0_LN/weights.json"
+endin
+```
+
+```
+i 99 0 0
+```
+
+Instr 99 fires at t=0, before any keys are pressed. The 7.84ms parse happens then with nothing playing, so the dropout is inaudible. Every `moognn init` after that shows `json=0.00ms`.
+
+Hit a segfault on first attempt. The opcode was declared as `Plugin<0, 1>` (zero outputs) which causes CPOF to miscalculate the inarg pointer offsets. Fix: `Plugin<1, 1>` with a dummy i-rate output that gets assigned 0 and ignored by the CSD.
+
+My main question now is that since the clicks were cause by a bug that made the fade in not work properly, maybe the previous models would work fine?
+
+## CPU cache warmup loop removal
+
+`init()` had a 64-sample silence loop before the h0 seed. The reasoning was that cold Eigen matrix cache misses on the first `aperf()` call could spike latency above the k-period budget. This was added as a precaution before the real click causes were found.
+
+Added first-aperf timing to measure it properly. With the loop: 0.47ms, 0.42ms. Without: 0.37ms, 0.50ms, 0.38ms, 0.38ms, 0.40ms. No difference, all within normal jitter. The loop also reset the model state immediately after, so it had zero effect on audio. Removed.
+
+## Run 15: k2h0 with 512 warmup samples
+
+Running a training while i experiment with run 14 with 512 warmup samples. If this model works well, ideally bring it down to 256 samples next.

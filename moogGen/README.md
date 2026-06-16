@@ -4,25 +4,29 @@ A command-line tool that runs a WAV file through a Moog ladder filter simulation
 
 ## Building
 
+Built as part of the root CMake project:
+
 ```bash
-g++ -std=c++17 -O2 main.cpp src/RKSimulationModel.h -o moogGen
+cmake -Bbuild
+cmake --build build --config Release --target moogGen
+# output: build/bin/Release/moogGen.exe
 ```
 
 ## Usage
 
 ```bash
-./moogGen -f <input.wav> [-o <output_dir>]
+build/bin/Release/moogGen.exe -f <input.wav> [-o <output_dir>]
 ```
 
-- `-f` / `--file` — the input WAV file (required)
-- `-o` / `--output` — folder to write the output files into (optional, defaults to current directory)
+- `-f` / `--file`: the input WAV file (required)
+- `-o` / `--output`: folder to write the output files into (optional, defaults to current directory)
 
 The output directory is created automatically if it doesn't exist.
 
 ## Example
 
 ```bash
-./moogGen -f ../bench_mono.wav -o output/bench
+build/bin/Release/moogGen.exe -f audio/bench_mono.wav -o audio/filteredOutput/bench
 ```
 
 This produces 15 filtered WAV files, one for each cutoff frequency:
@@ -45,6 +49,6 @@ Resonance is fixed at `0.5`.
 
 ## Notes
 
-- The filter model is an RK4 numerical simulation of the Moog ladder circuit — it's not a biquad approximation, so it sounds pretty authentic.
+- The filter model is an RK4 numerical simulation of the Moog ladder circuit, not a biquad approximation, so it sounds pretty authentic.
 - Input files should be mono. Stereo files will work but the filter processes the interleaved samples as a flat buffer, which will sound wrong.
 - Sample rate is read from the WAV file header automatically.
