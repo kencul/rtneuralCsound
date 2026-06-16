@@ -1,48 +1,44 @@
 # rtneuralCsound
 
-Research into neural network audio effect modeling using RTNeural, working toward a Csound opcode implementation. Trains models that can simulate analog filters (particularly Moog ladder filters) with real-time controllable parameters: cutoff frequency, resonance, etc.
-
-Currently the project can train a Conv1d→GRU→Dense neural network (with skip connection and optional `knob_to_h0` seeding) to model a 4-pole Moog low-pass filter. The trained model runs as a C++ inference tool on WAV files, and as a real-time Csound opcode plugin.
+Research into neural network audio effect modeling using RTNeural, working toward a Csound opcode implementation. Trains a Conv1d+GRU+Dense network to model a 4-pole Moog ladder low-pass filter with a real-time controllable cutoff, then runs it as a Csound plugin opcode.
 
 ## Repo layout
 
 ```
-├── audio/              # WAV files for training and evaluation
-├── moogGen/            # C++ tool for generating Moog filter training data
-├── python/             # Training scripts, evaluation, spectrum analysis
-│   ├── tensor_torch.py          # PyTorch training (static model)
-│   ├── tensor_torch_param.py    # PyTorch training (parameterized model)
-│   ├── eval_param_model.py      # Evaluate a trained model across cutoff frequencies
-│   └── compareSpectrum.py       # Spectrogram comparison tool
-├── ref/                # Archived trained models by version
-├── research/           # Notes and paper references
-├── src/                # C++ source
-│   ├── csound_opcode/            # Csound plugin opcode (moognn.dll)
-│   ├── process_wav/              # RTNeural JSON model (legacy)
-│   ├── process_wav_torch/        # PyTorch model, stereo
-│   └── process_wav_torch_param/  # PyTorch model with cutoff parameter
-├── csound/             # Csound test scripts
-│   ├── test_passthrough.csd  # File playback through opcode
-│   └── test_midi_saw.csd     # Live MIDI with CC-controlled cutoff
-├── vendor/             # Dependencies
-│   ├── MoogLadders/    # Moog ladder filter implementations (third-party)
-│   │   ├── src/        # Filter model headers
-│   │   └── example/    # Example files from the MoogLadders repo
-│   ├── RTNeural/       # Git submodule -- real-time neural network inference
-│   ├── csound/         # Git submodule -- Csound headers for opcode build
-│   └── dr_wav.h        # Single-header WAV reader/writer
+├── audio/
+│   ├── bench_mono.wav                  # Primary training/eval input
+│   └── filteredOutput/bench/           # Moog-filtered outputs (static and dynamic)
+├── models/                             # Trained model checkpoints by run number
+├── python/
+│   ├── tensor_torch_param.py           # Training script (parameterized model)
+│   ├── eval_param_model.py             # Static cutoff evaluation
+│   └── compareSpectrum.py              # Spectrogram comparison tool
+├── src/
+│   ├── moogGen/
+│   │   ├── main.cpp                    # moogGen: static training data generator
+│   │   └── sweep_ref.cpp               # sweep_ref: dynamic cutoff reference generator
+│   └── csound_opcode/
+│       └── moognn.cpp                  # Csound plugin opcode (moognn.dll)
+├── csound/
+│   ├── test_passthrough.csd            # File playback through opcode with cutoff sweep
+│   └── test_midi_saw.csd               # Live MIDI with CC-controlled cutoff
+├── vendor/
+│   ├── RTNeural/                       # Git submodule: real-time neural inference
+│   ├── MoogLadders/                    # Moog ladder filter reference implementations
+│   ├── csound/                         # Git submodule: Csound headers for opcode build
+│   └── dr_wav.h                        # Single-header WAV I/O
+├── devlog/                             # Full experiment diary
+├── research/                           # Paper notes and references
 ├── CMakeLists.txt
 └── requirements.txt
 ```
 
 ## Dependencies
 
-C++ build uses vendored libraries in `vendor/`:
-
-- **RTNeural** (`vendor/RTNeural/`): real-time neural network inference. Git submodule. [RTNeural Github](https://github.com/jatinchowdhury18/RTNeural)
-- **csound** (`vendor/csound/`): Csound source, used only for headers when building the opcode plugin. Git submodule. Note: this is a large repo (~500MB). [Csound Github](https://github.com/csound/csound)
-- **dr_wav** (`vendor/dr_wav.h`): single-header WAV reader/writer. [dr_wav.h in dr_libs repo](https://github.com/mackron/dr_libs/blob/master/dr_wav.h )
-- **MoogLadders** (`vendor/MoogLadders/`): collection of Moog ladder filter implementations. `moogGen` uses `RKSimulationModel` from `src/` for generating training data. [MoogLadders Github](https://github.com/ddiakopoulos/MoogLadders)
+- **RTNeural** (`vendor/RTNeural/`): real-time neural network inference. [Github](https://github.com/jatinchowdhury18/RTNeural)
+- **MoogLadders** (`vendor/MoogLadders/`): Moog ladder filter implementations. `moogGen` and `sweep_ref` use `RKSimulationModel`. [Github](https://github.com/ddiakopoulos/MoogLadders)
+- **dr_wav** (`vendor/dr_wav.h`): single-header WAV reader/writer. [Github](https://github.com/mackron/dr_libs/blob/master/dr_wav.h)
+- **csound** (`vendor/csound/`): headers only, for building the opcode DLL. Large repo (~500MB). [Github](https://github.com/csound/csound)
 
 ## Build
 
@@ -54,100 +50,114 @@ cmake --build build --config Release
 
 Binaries output to `build/bin/Release/`.
 
-To build only the Csound opcode DLL:
+To build individual targets:
 
 ```bash
+cmake --build build --config Release --target moogGen
+cmake --build build --config Release --target sweep_ref
 cmake --build build --config Release --target moognn
-# output: build/bin/Release/moognn.dll
 ```
 
-The opcode is loaded at runtime by Csound via `--opcode-lib=build/bin/Release/moognn.dll`. To install permanently, copy `moognn.dll` to `C:/Program Files/Csound7/plugins64/`.
+The opcode DLL is loaded by Csound via `--opcode-lib=build/bin/Release/moognn.dll`. To install permanently, copy it to `C:/Program Files/Csound7/plugins64/`.
 
-## Usage
+## Generating training and reference data
 
-### C++ inference tools
+### moogGen -- static cutoff training data
+
+Filters a WAV through the RK Moog ladder at a fixed grid of cutoff frequencies. Output files go in `audio/filteredOutput/bench/` and are used as training targets by `tensor_torch_param.py` and as ground truth by `eval_param_model.py`.
 
 ```bash
-# RTNeural JSON model (legacy, static)
-build/bin/Release/process_wav <model.json> <input.wav> <output.wav>
-
-# PyTorch model, stereo (static)
-build/bin/Release/process_wav_torch <model.json> <input.wav> <output.wav>
-
-# PyTorch model with cutoff parameter
-build/bin/Release/process_wav_torch_param <model.json> <input.wav> <output.wav> <cutoff_hz>
+build/bin/Release/moogGen.exe -f audio/bench_mono.wav -o audio/filteredOutput/bench
 ```
 
-### Training
+Generates one WAV per cutoff: `bench_mono_100hz.wav`, `bench_mono_1000hz.wav`, etc.
+
+### sweep_ref -- dynamic cutoff reference
+
+Filters a WAV through the same RK Moog with a time-varying cutoff. Writes a float32 reference WAV and a companion CSV of per-sample normalized knob values (0-1, same log scaling the model uses). The CSV is read by `eval_dynamic.py` to drive the neural model through the exact same cutoff trajectory for comparison.
+
+```bash
+# Exponential sweep from 100Hz to 20kHz
+build/bin/Release/sweep_ref.exe audio/bench_mono.wav out.wav out.csv log 100 20000 [resonance=1.0]
+
+# Sinusoidal LFO between 100Hz and 10kHz at 2Hz
+build/bin/Release/sweep_ref.exe audio/bench_mono.wav out.wav out.csv lfo 100 10000 [resonance=1.0] [lfo_rate_hz=1.0]
+```
+
+Pre-generated reference files in `audio/filteredOutput/bench/`:
+
+| File | Type | Range | Rate |
+|------|------|-------|------|
+| `bench_mono_sweep_log_100-20000hz` | log sweep | 100Hz to 20kHz | once over 40s |
+| `bench_mono_lfo_slow_100-10000hz` | LFO | 100Hz to 10kHz | 0.25Hz (4s period) |
+| `bench_mono_lfo_fast_100-10000hz` | LFO | 100Hz to 10kHz | 5Hz (0.2s period) |
+
+## Training
 
 Set up a Python venv:
 
 ```bash
 python -m venv env
 source env/Scripts/activate    # Windows
-# source env/bin/activate       # Mac/Linux
 pip install -r requirements.txt
-# Install PyTorch from https://pytorch.org/get-started/locally/
+# Install PyTorch separately: https://pytorch.org/get-started/locally/
 ```
 
-Train a parameterized Moog filter model:
+Train:
 
 ```bash
-python python/tensor_torch_param.py
+python python/tensor_torch_param.py models/my_run
 ```
 
-Evaluate a trained model across cutoff frequencies:
+Evaluate at static cutoffs:
 
 ```bash
-python python/eval_param_model.py best_model_param.pt
-```
-
-### Generating training data
-
-The `moogGen/` tool filters a WAV file at multiple static cutoff frequencies using a 4-pole Moog ladder implementation with configurable oversampling:
-
-```bash
-cd moogGen
-cmake -Bbuild
-cmake --build build --config Release
-build/Release/moogGen.exe <input.wav>
+python python/eval_param_model.py models/my_run/best_model.pt [warmup_samples] [freq_min]
 ```
 
 ## Model architecture
 
-The architecture is still being evaluated through ablation studies. The diagram below shows the base structure; unit count, LayerNorm, and knob_to_h0 are all variables under active experimentation. See [devlog/DEVLOG.md](devlog/DEVLOG.md) for the full ablation results.
-
 ```
 Input audio (1 sample) ──┐
-   │                     │
-Conv1d (16ch, k=31)      │ skip connection
-   │                     │
-concat(knob value)       │
-   │                     │
-GRU (32 hidden units)    │
-   │                     │
-Dense (1 output)  ───────┼── + ──→ Output
+   |                     |
+Conv1d (16ch, k=31)      |
+   |                     | skip connection
+LayerNorm                |
+   |                     |
+concat(knob 0-1)         |
+   |                     |
+GRU (128 units)          |
+   |                     |
+Dense (1 output) ────────+──> Output
 ```
 
-All layers (Conv1d, GRU, Dense) are natively supported by RTNeural, meaning the model can be deserialized directly from JSON without custom inference code, and can use RTNeural's templated static graph mode for optimal performance.
+The knob input is a log-normalized value in [0, 1] mapping 100Hz to 20kHz. The deployed model is run 19: 128 GRU units, 256-sample training warmup, 100Hz frequency floor, no knob_to_h0. See [devlog/DEVLOG2.md](devlog/DEVLOG2.md) for the full experiment history and ablation results.
 
-An optional `knob_to_h0` layer seeds the GRU initial hidden state from the cutoff value, which helps especially at low cutoff frequencies.
+## Csound opcode
 
-## DEVLOG
+Opcode signature: `aout moognn ain, Spath, kcutoff`
 
-The full development diary — every experiment, failure, breakthrough, and lesson learned — lives in [devlog/DEVLOG.md](devlog/DEVLOG.md). It starts with the TensorFlow baseline, covers the switch to PyTorch, GPU training, gradient explosions, windowed training with warmup, the Moog filter data pipeline, the parameterized model saga (including the infamous bad 16kHz training data), ablation studies, and the ongoing work toward the Csound opcode and dynamic parameter handling.
+- `ain`: audio input
+- `Spath`: path to the model JSON weights file
+- `kcutoff`: cutoff frequency in Hz (k-rate)
+
+Use `moognn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires.
+
+See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples.
 
 ## Next steps
 
+- Write `eval_dynamic.py` to compare neural model output against sweep_ref on the dynamic cutoff files
+- FiLM conditioning experiment: replace knob concatenation with post-GRU FiLM, train at 64 units
+- Paper: Csound conference writeup
 - Dynamic cutoff testing -- the model has only been evaluated on static cutoffs so far
 - ~~Csound opcode implementation (must-have for the conference paper)~~ -- done, see `src/csound_opcode/`
 - ~~Architecture sweet spot -- 64 GRU units with `knob_to_h0`~~ -- trained (run 14), ablation complete
 - Variable-parameter training data with sweeps and modulation
 - Fix per-note click on cold start without an always-on send effect workaround
 
-
 ## References
 
+- [RTNeural](https://github.com/jatinchowdhury18/RTNeural)
+- [devlog/DEVLOG2.md](devlog/DEVLOG2.md)
 https://medium.com/data-science/mini-neural-nets-for-guitar-effects-with-microcontrollers-ea9cdad2a29c
-
-https://github.com/jatinchowdhury18/RTNeural

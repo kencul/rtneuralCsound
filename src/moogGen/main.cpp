@@ -4,7 +4,7 @@
 #include <string>
 
 #include "wav_utils.hpp"
-#include "../vendor/MoogLadders/src/RKSimulationModel.h"
+#include <RKSimulationModel.h>
 
 int main(int argc, char* argv[]) {
     std::string inputFile;

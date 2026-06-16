@@ -311,20 +311,47 @@ Approximately 10 lines added to the training loop. Can be combined with FiLM. No
 
 ---
 
+## Repo cleanup
+
+Moved `moogGen/` into `src/moogGen/` to keep all C++ tools under `src/`. Renamed `ref/` to `models/` since that's what it actually contains. Updated all hardcoded paths in the .csd files, training script, README, and CMakeLists.
+
+---
+
+## sweep_ref tool
+
+Added `src/moogGen/sweep_ref.cpp`, a standalone C++ tool that runs the RK Moog with a time-varying cutoff and writes two outputs: a float32 reference WAV and a per-sample CSV of normalized knob values (same 0-1 log scaling the model uses). The CSV is what `eval_dynamic.py` will read to drive the neural model through the identical cutoff trajectory.
+
+Two sweep modes:
+
+- `log`: exponential ramp from freq_start to freq_end over the full file
+- `lfo`: sinusoidal oscillation in log-frequency space between freq_low and freq_high at a given rate
+
+The normalization happens in C++ so the CSV values are already in model space and Python doesn't need to know FREQ_MIN/FREQ_MAX.
+
+Generated three reference files in `audio/filteredOutput/bench/`:
+
+- `bench_mono_sweep_log_100-20000hz` -- full log sweep, 40 seconds
+- `bench_mono_lfo_slow_100-10000hz` -- LFO at 0.25Hz (4s period)
+- `bench_mono_lfo_fast_100-10000hz` -- LFO at 5Hz (0.2s period)
+
+All use resonance=0.5 to match the training data.
+
+---
+
 ## Current state
 
 - Run 19 (128 GRU units, 256 warmup, 100Hz floor) is the deployed model: 6-voice polyphony, best accuracy for real-time use
 - Run 20 (256 units) achieves better accuracy but is limited to single voice
 - The RTNeural build is fully optimized (xsimd + AVX2, pinned in CMakeLists.txt)
 - Knob conditioning is the main architectural weakness: input concatenation is the worst method per literature
-- Dynamic cutoff behavior is completely untested
+- Dynamic reference data is ready; eval script (`eval_dynamic.py`) is the remaining piece before dynamic cutoff behavior can be measured
 
 ---
 
 ## Next steps
 
-- **Dynamic cutoff testing**: the model has only been evaluated at static cutoffs. Write a script that runs both the C++ Moog reference and the neural model through the same cutoff sweep and compares output. This is the most important unknown before the paper.
+- **Dynamic cutoff eval**: write `eval_dynamic.py` to run the neural model with the sweep/LFO knob schedules from the CSV and compare against the reference WAVs. Time-windowed ESR + spectrogram plot.
 - **FiLM experiment**: modify `tensor_torch_param.py` to replace knob concatenation with post-GRU FiLM conditioning. Train at 64 units. Compare ESR against run 19. If accuracy is comparable, rebuild opcode with 64-unit GRU + FiLM layer and test polyphony.
 - **Knowledge distillation**: if FiLM at 64 units falls short of run 19, add run 19 as teacher to the loss function. Low effort add-on to any new training run.
 - **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets to improve dynamic tracking. Depends on dynamic cutoff test results to know if this is needed.
-- **Paper**: write up for the Csound conference — architecture decisions, ablation results, warmup analysis, and opcode implementation. Dynamic cutoff results and FiLM experiment would strengthen it but current material is already sufficient for submission.
+- **Paper**: write up for the Csound conference -- architecture decisions, ablation results, warmup analysis, and opcode implementation. Dynamic cutoff results and FiLM experiment would strengthen it but current material is already sufficient for submission.
