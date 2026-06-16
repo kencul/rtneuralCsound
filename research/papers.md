@@ -280,5 +280,5 @@ Relevance: A gray-box alternative to the fully black-box RNN approach used in th
 https://nva.sikt.no/registration/0198cc80a594-816602e1-c533-4d70-a45e-a0b8606fa3d0
 Max msp program for collecting data with dynamic params
 
-https://www.dafx.de/paper-archive/2023/DAFx23_paper_14.pdf
+https://dafx25.dii.univpm.it/wp-content/uploads/2025/07/DAFx25_paper_61.pdf
 KORG paper for realLRU
