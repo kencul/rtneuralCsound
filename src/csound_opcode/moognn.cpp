@@ -1,6 +1,5 @@
 // RTNeural and standard library must be included before Csound headers to avoid
 // macro collisions from Csound's C API trampling C++ reserved words.
-#define EIGEN_STACK_ALLOCATION_LIMIT 0
 #include <RTNeural/RTNeural.h>
 #include <algorithm>
 #include <cmath>
@@ -63,8 +62,8 @@ using ConvStage =
     RTNeural::ModelT<float, 1, 16, RTNeural::Conv1DT<float, 1, 16, 31, 1>>;
 
 using RecurrentStage =
-    RTNeural::ModelT<float, 17, 1, RTNeural::GRULayerT<float, 17, 64>,
-                     RTNeural::DenseT<float, 64, 1>>;
+    RTNeural::ModelT<float, 17, 1, RTNeural::GRULayerT<float, 17, 128>,
+                     RTNeural::DenseT<float, 128, 1>>;
 
 struct Model {
   ConvStage conv;

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 project(rtneuralCsound VERSION 0.1.0)
 
+set(RTNEURAL_XSIMD ON CACHE BOOL "Use xsimd backend for RTNeural" FORCE)
+set(RTNEURAL_USE_AVX ON CACHE BOOL "Enable AVX2 for RTNeural" FORCE)
 add_subdirectory(vendor/RTNeural)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

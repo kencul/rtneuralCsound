@@ -10,7 +10,7 @@ if len(sys.argv) < 2:
 
 FREQ_MIN = float(sys.argv[3]) if len(sys.argv) > 3 else 20.0
 FREQ_MAX = 20000.0
-GRU_HIDDEN = 128
+GRU_HIDDEN = 256
 
 ALL_CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
 CUTOFF_FREQS = [f for f in ALL_CUTOFF_FREQS if f >= FREQ_MIN]

@@ -233,24 +233,98 @@ Run 19 also beats run 14 (the long-warmup k2h0 model) from 500Hz upward, despite
 
 Training converged cleanly: early stopping at epoch 279, val_loss 0.0001. Epoch time ~12s vs ~8s for 64-unit runs, total 53 minutes.
 
-## Incomplete run 20 (256 GRU units)
+---
 
-Each epoch was taking around 102 seconds, which is just how GRU units scale. This will take 12 hours ish, going now.
+## Run 20 (256 GRU units)
+
+Doubled units again to 256. Training took 10.4 hours (150s/epoch), early stopping at epoch 294. Significant gains across the board.
+
+| Freq | Run 19 (128u) | Run 20 (256u) | Delta |
+|------|--------------|--------------|-------|
+| 100Hz | -34.7dB | -41.3dB | +6.6dB |
+| 250Hz | -41.9dB | -46.7dB | +4.8dB |
+| 500Hz | -45.8dB | -48.9dB | +3.1dB |
+| 1kHz | -46.7dB | -48.6dB | +1.9dB |
+| 4kHz | -46.6dB | -51.7dB | +5.1dB |
+| 12kHz | -50.2dB | -56.0dB | +5.8dB |
+| 16kHz | -53.7dB | -57.7dB | +4.0dB |
+| 20kHz | -52.6dB | -55.7dB | +3.1dB |
+
+The 100Hz improvement (+6.6dB) was unexpected given the warmup period-visibility argument. More capacity helps even at the constrained low end. High frequencies now reach -56 to -58dB, well into inaudible territory.
+
+The open question is real-time viability. 256 units is 4x the GRU compute of 128 units. At 32 samples/block (667µs budget) this may not run in real time. The opcode needs to be updated and rebuilt to get timing stats from `deinit()`. If it cannot hit real time, run 19 remains the practical deployment choice.
+
+Running this model in the opcode, 256 units is too much computationally for polyphony. Its fine with one note, but playing two notes makes the audio crackle horribly.
+
+The 128 unit model starts crackling at 7 notes, unstable at 6.
+
+---
+
+## RTNeural optimization audit
+
+Audited the build configuration and opcode implementation for inference efficiency. Findings:
+
+- The build cache already had `RTNEURAL_XSIMD=ON` and `RTNEURAL_USE_AVX=ON` from a prior configure, so xsimd + AVX2 (256-bit SIMD, 32-byte alignment) were already active. These were not pinned in CMakeLists.txt, meaning a fresh configure would silently drop them. Both are now explicitly set with `FORCE` so they persist.
+- `ModelT` (static, compile-time shapes) is already used throughout — correct for real-time audio; eliminates virtual dispatch and enables full compiler unrolling.
+- A dead `#define EIGEN_STACK_ALLOCATION_LIMIT 0` was removed from moognn.cpp (Eigen-specific, irrelevant with xsimd backend).
+- No further RTNeural-level optimizations are available. The inference is fundamentally sample-by-sample sequential due to the GRU hidden state dependency.
+
+---
+
+## Polyphony ceiling analysis
+
+The polyphony limits are now measured:
+
+| Model | Voices before crackle |
+|-------|-----------------------|
+| Run 20 (256u) | 2 |
+| Run 19 (128u) | 6 (crackles at 7) |
+
+Increasing buffer sizes (`-b`, `-B`) does not help. The GRU runs 48,000 times per second per voice regardless of block size — buffer size only changes how often the OS callback fires, not total compute.
+
+A literature review of the field (Wright 2019, RTNeural paper, Steinmetz 2022, etc.) confirms that all published real-time neural audio effect models are designed for monophonic always-on effects — guitar amp sims, compressors, distortion pedals. None address polyphonic per-note instantiation. The community norm for single-voice real-time is 16–64 GRU/LSTM units. 128 units at 6-voice polyphony is already above what the literature targets.
+
+---
+
+## Polyphony improvement options
+
+Three approaches were evaluated for reducing compute to increase polyphony:
+
+**Linear Recurrent Units (LRUs):** The Esqueda & Murai DAFx25 paper proposes LRUs as a more efficient recurrent architecture. The diagonal state matrix (N scalars instead of N×N weights) makes the state update fundamentally cheaper than GRU. Their results show models with <1% CPU at 128-sample buffer. However: (1) inference is still sample-by-sample sequential — the parallel scan is training-only; (2) the benchmarks are on Apple M2 Pro, though the architectural savings transfer to x86 AVX2; (3) FiLM conditioning failed for LRU in their experiments, increasing hidden size requirements, and the conditioning problem for a parametric filter is unsolved for LRUs; (4) LRUs are not in RTNeural's native layer set, requiring a custom C++ inference path. Not pursued for now.
+
+**GRU depth (stacking layers):** The LRU paper found depth more efficient than width for LRUs. This does not transfer to GRUs — stacking GRU layers doubles sequential compute per sample and the literature has not found it beneficial for single-layer audio effects. Not pursued.
+
+**FiLM conditioning:** Feature-wise Linear Modulation is the most actionable path. The current architecture concatenates the knob as GRU input channel 17 — the SMC 2024 paper (Simionato & Fasciani) found this is the worst conditioning method. FiLM instead applies a learned scale and shift to the GRU output features based on the knob:
+
+```
+FiLM(x, knob) = γ(knob) ⊙ x + β(knob)
+[γ, β] = Linear(knob)   # 1 → 2×hidden_size
+```
+
+Post-placement (after the GRU, before Dense) consistently outperformed pre-placement in that paper. The GRU input would drop from 17 to 16 channels. FiLM computation cost is negligible: γ and β are computed once per k-cycle (knob is k-rate), and the per-sample application is 128 multiply-adds vs the GRU's ~56,000. The hypothesis is that a 64-unit GRU with FiLM might match run 19 (128-unit, concatenation), since the GRU no longer spends capacity inferring the filter mode from the knob stream.
+
+**Knowledge distillation:** Complementary to any smaller model training. Run 19 acts as teacher (frozen inference), the smaller student model trains against both the target signal and the teacher's outputs:
+```
+loss = ESR(student, target) + λ * MSE(student, teacher_output)
+```
+Approximately 10 lines added to the training loop. Can be combined with FiLM. Note: the Carson DAFx25 paper referenced elsewhere uses a teacher-student method for anti-aliasing (same-size model fine-tuning), which is a different use of the term — knowledge distillation for compression is a distinct technique.
 
 ---
 
 ## Current state
 
-- Run 19 (128 GRU units, 256 warmup, 100Hz floor) is the best short-fade model by a wide margin
-- Run 19 beats run 14 from 500Hz upward despite a much shorter warmup
-- Run 14 still has better coverage below 100Hz
+- Run 19 (128 GRU units, 256 warmup, 100Hz floor) is the deployed model: 6-voice polyphony, best accuracy for real-time use
+- Run 20 (256 units) achieves better accuracy but is limited to single voice
+- The RTNeural build is fully optimized (xsimd + AVX2, pinned in CMakeLists.txt)
+- Knob conditioning is the main architectural weakness: input concatenation is the worst method per literature
+- Dynamic cutoff behavior is completely untested
 
 ---
 
 ## Next steps
 
-- **Deploy run 19**: update the opcode to support 128 GRU units and test click behavior.
-- **Consider 256 units**: run 19 still has room at 100-250Hz. Diminishing returns likely but worth one test.
-- **Dynamic cutoff testing**: the model has only been evaluated on static cutoffs. Write a script that sweeps the cutoff mid-file and compares against the real Moog filter.
-- **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets to improve dynamic tracking.
-- **Paper**: write up for the Csound conference — architecture decisions, ablation results, and opcode implementation.
+- **Dynamic cutoff testing**: the model has only been evaluated at static cutoffs. Write a script that runs both the C++ Moog reference and the neural model through the same cutoff sweep and compares output. This is the most important unknown before the paper.
+- **FiLM experiment**: modify `tensor_torch_param.py` to replace knob concatenation with post-GRU FiLM conditioning. Train at 64 units. Compare ESR against run 19. If accuracy is comparable, rebuild opcode with 64-unit GRU + FiLM layer and test polyphony.
+- **Knowledge distillation**: if FiLM at 64 units falls short of run 19, add run 19 as teacher to the loss function. Low effort add-on to any new training run.
+- **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets to improve dynamic tracking. Depends on dynamic cutoff test results to know if this is needed.
+- **Paper**: write up for the Csound conference — architecture decisions, ablation results, warmup analysis, and opcode implementation. Dynamic cutoff results and FiLM experiment would strengthen it but current material is already sufficient for submission.
