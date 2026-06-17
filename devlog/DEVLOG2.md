@@ -462,11 +462,65 @@ python eval_dynamic.py     <model.pt> <ref.wav> <ref.csv> [warmup] [--save <dir>
 
 Verified on runs 16 and 19: ESR numbers match prior results exactly.
 
-With the model files in place, adding a new architecture for training is two lines: import the right model file and set `GRU_HIDDEN`. `tensor_torch_film.py` is the FiLM training script — identical to `tensor_torch_param.py` except it imports from `model_film` and sets `GRU_HIDDEN = 64`. The checkpoint it saves is tagged `'arch': 'film'` so eval scripts auto-detect it.
+With the model files in place, adding a new architecture for training is two lines: import the right model file and set `GRU_HIDDEN`. `tensor_torch_film.py` is the FiLM training script, identical to `tensor_torch_param.py` except it imports from `model_film` and sets `GRU_HIDDEN = 64`. The checkpoint it saves is tagged `'arch': 'film'` so eval scripts auto-detect it.
 
 ```bash
 env/Scripts/python.exe python/tensor_torch_film.py models/21_moog_film_64u_w256
 ```
+
+---
+
+## Run 21 (FiLM, 64 units, 256 warmup)
+
+### FiLM initialization bug
+
+The first training attempt plateaued immediately at val_loss ~0.21 and never improved. The cause: `nn.Linear` default initialization sets the FiLM weights and biases to random values in roughly [-1, 1]. At epoch 1 the FiLM layer is randomly scaling and inverting GRU output before Dense sees it, putting the optimizer in a hole it cannot escape from.
+
+Fix: zero the FiLM weights and set the gamma bias to 1, beta bias to 0. This makes FiLM a pass-through at initialization -- gamma=1, beta=0 for any knob value -- so the model learns the base GRU behavior first and gradually acquires the modulation.
+
+```python
+nn.init.zeros_(self.film.weight)
+nn.init.zeros_(self.film.bias)
+self.film.bias.data[:gru_hidden] = 1.0
+```
+
+### Training
+
+Training ran 163 epochs before early stopping (3 LR steps: 1e-3 to 1.25e-4). Best val_loss: **0.2100**.
+
+For reference, run 16 (64 units, concat) converged to val_loss 0.0001. The FiLM model is 2000x worse in linear ESR. Despite the identity initialization fix, the model fundamentally failed to learn.
+
+### Eval results
+
+**Static ESR:**
+
+| Freq | Run 21 (FiLM, 64u) | Run 16 (concat, 64u) |
+|------|-------------------:|--------------------:|
+| 100 Hz | -5.4 dB | -34.0 dB |
+| 500 Hz | -4.9 dB | -41.0 dB |
+| 1 kHz | -5.2 dB | -42.8 dB |
+| 4 kHz | -8.1 dB | -45.3 dB |
+| 16 kHz | -4.4 dB | -48.2 dB |
+
+**Dynamic (fast LFO, 5 Hz):** -6.4 dB. Run 16 was -39.5 dB.
+
+### Analysis
+
+Post-GRU FiLM does not work for parametric filter emulation.
+
+In the concat model the GRU sees the knob at every time step and learns different hidden state trajectories for different cutoffs. The GRU at 100Hz behaves differently from the GRU at 20kHz because the knob is part of its input at every step.
+
+In the FiLM model the GRU receives only conv audio features -- no knob information at all. It processes all cutoff frequencies identically and produces the same hidden state regardless of the target filter mode. FiLM can only scale and shift the result after the fact; it cannot change what the GRU computed. A 100Hz low-pass and a 20kHz near-passthrough are not related by a scale and shift of the same hidden state.
+
+The SMC 2024 paper validated post-GRU FiLM for a compressor, where the core computation (detect transient, apply gain) is consistent across parameter values and conditioning only modulates magnitude. A Moog filter at different cutoffs requires different recurrent behavior, not just different output scaling.
+
+### Next steps
+
+Two paths forward:
+
+**Variable training data.** The fast LFO degradation has two causes: slow conditioning (the knob integration problem) and distributional mismatch (the model was trained only on static cutoffs). Variable training data -- LFO-swept targets mixed into training -- addresses the second cause directly and requires no architecture change.
+
+**Pre-GRU FiLM.** Applying FiLM to the conv features before the GRU gives the GRU conditioned input, so it can route itself differently per cutoff. This preserves the architectural motivation (single-step conditioning) while fixing the information bottleneck. Worth one experiment after variable training data is established.
 
 ---
 

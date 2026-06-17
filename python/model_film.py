@@ -26,6 +26,10 @@ class Model(nn.Module):
         self.gru   = nn.GRU(16, gru_hidden, batch_first=True)
         self.film  = nn.Linear(1, 2 * gru_hidden)  # knob → [gamma, beta]
         self.dense = nn.Linear(gru_hidden, 1)
+        # identity init: gamma=1, beta=0 so FiLM starts as a pass-through
+        nn.init.zeros_(self.film.weight)
+        nn.init.zeros_(self.film.bias)
+        self.film.bias.data[:gru_hidden] = 1.0
 
     def forward(self, x, h=None):
         audio    = x[:, :, :1]
