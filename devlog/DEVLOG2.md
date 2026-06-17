@@ -522,21 +522,58 @@ Two paths forward:
 
 **Pre-GRU FiLM.** Applying FiLM to the conv features before the GRU gives the GRU conditioned input, so it can route itself differently per cutoff. This preserves the architectural motivation (single-step conditioning) while fixing the information bottleneck. Worth one experiment after variable training data is established.
 
+## Script updates for FiLM architecture variants
+
+Run 21 (post-GRU) and run 22 (pre-GRU) both carry `arch='film'` in their checkpoints but have incompatible FiLM weight shapes. `model_film.py` was updated to support both placements via a `film_pre` constructor argument (default `True`). The eval scripts auto-detect placement from the FiLM weight shape: `[32, 1]` (2 x 16 conv channels) is pre-GRU; `[128, 1]` (2 x 64 GRU units) is post-GRU.
+
+---
+
+## Run 22 (pre-GRU FiLM, 64 units, 256 warmup)
+
+### Training
+
+Val_loss 0.0001, ran all 300 epochs through 5 LR steps (1e-3 to 3.13e-5). No early stopping. 34.7 minutes total.
+
+The training curve has a notable phase transition. Epochs 1-22 descend slowly from 0.29 to 0.22 -- FiLM is near identity, GRU is learning audio processing. Between epochs 22-28 val_loss drops suddenly from 0.246 to 0.004. That is the moment FiLM breaks out of identity and the GRU and FiLM find a cooperative solution. Post-GRU run 21 never reached this transition because the GRU had no useful representation for FiLM to modulate.
+
+### Eval results
+
+**Static ESR (dB):**
+
+| Freq | Run 16 (concat, 64u) | Run 19 (concat, 128u) | Run 22 (FiLM pre, 64u) |
+|------|--------------------:|---------------------:|----------------------:|
+| 100 Hz | -34.0 | -34.7 | -33.4 |
+| 500 Hz | -41.0 | -45.8 | -39.2 |
+| 1 kHz | -42.8 | -46.7 | -39.6 |
+| 4 kHz | -45.3 | -46.6 | -41.5 |
+| 16 kHz | -48.2 | -53.7 | -47.9 |
+| 20 kHz | -46.8 | -52.6 | -49.1 |
+
+**Dynamic (fast LFO, 5 Hz):** run 22: -24.2 dB. Run 16: -39.5 dB. Run 19: -29.4 dB.
+
+### Analysis
+
+Pre-GRU FiLM works as an architecture. Static accuracy is within 2-3 dB of run 16 at mid frequencies and matches or beats it above 12 kHz. Pre-GRU FiLM at 64 units is roughly equivalent to concat at 64 units, not an improvement.
+
+The fast LFO result is the key finding. Run 22 at -24.2 dB is the worst dynamic result of any viable model, worse than both run 16 and run 19. The static-to-LFO gap is 15.4 dB at 1 kHz, similar to run 19 (17.3 dB) and far above run 16 (3.3 dB).
+
+Pre-GRU FiLM does not improve dynamic tracking. FiLM conditions the GRU inputs in a single step, but the GRU hidden state still integrates those inputs over time to settle into the correct filter mode. When the cutoff sweeps at 5 Hz the hidden state is pulled in a new direction 10 times per second. The integration problem is in the recurrent state, not the conditioning pathway. FiLM placement does not affect this.
+
+Run 16 (concat, 64 units) remains the most dynamically stable model. The training data distribution is the bottleneck, not the architecture. The FiLM conditioning experiments are concluded.
+
 ---
 
 ## Current state
 
 - Run 19 (128 GRU units, 256 warmup, 100Hz floor) is the deployed model: 6-voice polyphony, best static accuracy for real-time use
-- Run 20 (256 units) is better statically but limited to single voice and degrades less gracefully on fast LFO than expected
-- Run 16 (64 units, 256 warmup) is the most dynamically stable: only 3.3 dB gap between static and fast LFO performance
+- Run 16 (64 units, 256 warmup) is the most dynamically stable: only 3.3 dB gap between static and fast LFO
+- Run 20 (256 units) is better statically but limited to single voice
 - The RTNeural build is fully optimized (xsimd + AVX2, pinned in CMakeLists.txt)
-- Dynamic eval confirms the conditioning mechanism is the bottleneck: larger models degrade more under fast modulation
+- FiLM conditioning experiments (runs 21-22) are complete. Post-GRU FiLM failed entirely. Pre-GRU FiLM matched concat at the same unit count but did not improve dynamic tracking. Architecture is not the bottleneck for fast LFO degradation.
 
 ---
 
 ## Next steps
 
-- **FiLM experiment**: modify `tensor_torch_param.py` to replace knob concatenation with post-GRU FiLM conditioning. Train at 64 units. The hypothesis is that FiLM allows single-step cutoff adaptation instead of requiring the GRU to integrate the knob over time, which should close the static-to-dynamic gap. Compare static and fast LFO ESR against run 16 (the current dynamic benchmark) and run 19 (the static benchmark).
-- **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets. Necessary regardless of FiLM -- the models were trained on static cutoffs only and the fast LFO degradation partly reflects that distributional mismatch.
-- **Knowledge distillation**: if FiLM at 64 units falls short of run 19 statically, add run 19 as teacher to the loss function. Low effort add-on.
-- **Paper**: write up for the Csound conference -- architecture decisions, ablation results, warmup analysis, opcode implementation, and dynamic eval results. FiLM experiment would be a strong addition but current material is sufficient for submission.
+- **Variable-parameter training data**: mix LFO-swept cutoff targets into training. Models were trained on static cutoffs only. The fast LFO gap is largely a distributional mismatch. This is the highest-leverage remaining experiment and requires no architecture change.
+- **Paper**: write up for the Csound conference -- architecture decisions, ablation results, warmup analysis, opcode implementation, dynamic eval, and FiLM experiment results.

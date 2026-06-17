@@ -125,10 +125,12 @@ def main():
 
     if arch == 'film':
         from model_film import Model
+        # film weight shape [2*16, 1] = pre-GRU; [2*gru_hidden, 1] = post-GRU
+        film_pre = state_dict['film.weight'].shape[0] == 32
+        model = Model(gru_hidden=gru_hidden, film_pre=film_pre).to(device)
     else:
         from model_concat import Model
-
-    model = Model(gru_hidden=gru_hidden).to(device)
+        model = Model(gru_hidden=gru_hidden).to(device)
     model.load_state_dict(state_dict)
     model.eval()
 
