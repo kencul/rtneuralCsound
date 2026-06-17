@@ -311,20 +311,103 @@ Approximately 10 lines added to the training loop. Can be combined with FiLM. No
 
 ---
 
+## Repo cleanup
+
+Moved `moogGen/` into `src/moogGen/` to keep all C++ tools under `src/`. Renamed `ref/` to `models/` since that's what it actually contains. Updated all hardcoded paths in the .csd files, training script, README, and CMakeLists.
+
+---
+
+## sweep_ref tool
+
+Added `src/moogGen/sweep_ref.cpp`, a standalone C++ tool that runs the RK Moog with a time-varying cutoff and writes two outputs: a float32 reference WAV and a per-sample CSV of normalized knob values (same 0-1 log scaling the model uses). The CSV is what `eval_dynamic.py` will read to drive the neural model through the identical cutoff trajectory.
+
+Two sweep modes:
+
+- `log`: exponential ramp from freq_start to freq_end over the full file
+- `lfo`: sinusoidal oscillation in log-frequency space between freq_low and freq_high at a given rate
+
+The normalization happens in C++ so the CSV values are already in model space and Python doesn't need to know FREQ_MIN/FREQ_MAX.
+
+Generated three reference files in `audio/filteredOutput/bench/`:
+
+- `bench_mono_sweep_log_100-20000hz` -- full log sweep, 40 seconds
+- `bench_mono_lfo_slow_100-10000hz` -- LFO at 0.25Hz (4s period)
+- `bench_mono_lfo_fast_100-10000hz` -- LFO at 5Hz (0.2s period)
+
+All use resonance=0.5 to match the training data.
+
+---
+
+## eval_dynamic.py
+
+Written to evaluate the model against the sweep_ref reference files. Takes a model checkpoint, a reference WAV, and the companion knob CSV. Runs the model with the per-sample knob schedule from the CSV (the values are already normalized to [0,1] by sweep_ref, so no frequency math needed in Python), carries GRU hidden state across 8192-sample chunks, and scores the output against the reference WAV.
+
+Output: overall ESR in dB printed to stdout, plus a 4-panel plot (reference spectrogram, model output spectrogram, difference spectrogram, windowed ESR over time at 0.5s resolution).
+
+`eval_param_model.py` was also updated to match: it now produces the same 4-panel layout, with the spectrograms shown at 1kHz and the fourth panel showing ESR by frequency on a log scale. Its hardcoded `GRU_HIDDEN = 256` was replaced with a `[gru_hidden=128]` positional argument, defaulting to 128 to match run 19.
+
+Both scripts share the same flags:
+
+- `--save <dir>` -- write output files to the given directory, prompting before overwriting. For `eval_param_model` the files are always `evalOutput.txt` and `evalOutput.png`. For `eval_dynamic` the filenames include the sweep name derived from the ref WAV (e.g. `evalOutput_lfo_fast_100-10khz.txt`) so multiple sweeps can be saved to the same model directory without collision.
+- `--force` -- skip the overwrite prompt; used for batch runs
+- `--show` -- open the interactive plot window; without it the script runs headlessly
+- `--help` / `-h` -- print usage; also printed on bad or missing arguments
+
+```
+python eval_param_model.py <model.pt> [warmup] [freq_min] [gru_hidden] [--save <dir>] [--force] [--show]
+python eval_dynamic.py     <model.pt> <ref.wav> <ref.csv> [gru_hidden] [warmup] [--save <dir>] [--force] [--show]
+```
+
+---
+
+## Cross-model dynamic eval (runs 16, 17, 19, 20)
+
+Static and dynamic evals run across all four 100Hz-floor models.
+
+**Static ESR (dB) at key frequencies:**
+
+| Freq | Run 16 (64u, w256) | Run 17 (64u, w128) | Run 19 (128u, w256) | Run 20 (256u, w256) |
+|------|-------------------:|-------------------:|--------------------:|--------------------:|
+| 100 Hz | -34.0 | -26.4 | -34.7 | -41.3 |
+| 250 Hz | -37.3 | -34.9 | -41.9 | -46.7 |
+| 1 kHz | -42.8 | -39.1 | -46.7 | -48.6 |
+| 4 kHz | -45.3 | -40.3 | -46.6 | -51.7 |
+| 16 kHz | -48.2 | -45.1 | -53.7 | -57.7 |
+
+**Dynamic ESR (dB) overall:**
+
+| Model | sweep_log | lfo_slow (0.25 Hz) | lfo_fast (5 Hz) | fast LFO gap vs static 1 kHz |
+|-------|----------:|-------------------:|----------------:|-----------------------------:|
+| Run 16 (64u, w256) | -41.2 | -40.3 | -39.5 | 3.3 dB |
+| Run 17 (64u, w128) | -38.0 | -35.6 | -26.8 | 12.3 dB |
+| Run 19 (128u, w256) | -40.8 | -42.0 | -29.4 | 17.3 dB |
+| Run 20 (256u, w256) | -41.6 | -47.7 | -37.3 | 11.3 dB |
+
+**Warmup effect (runs 16 vs 17):** halving warmup from 256 to 128 samples costs 4-8 dB at every static frequency, with the largest hit at 100 Hz (7.6 dB). On the fast LFO the penalty is even larger: run 17 drops to -26.8 dB, the worst result across all conditions.
+
+**Capacity effect (runs 16, 19, 20):** doubling units at fixed warmup gives consistent static gains. 16 to 19 adds 3-7 dB, mostly at high frequencies; the 100 Hz floor barely moves (+0.7 dB), confirming the period-visibility constraint still dominates there. 19 to 20 adds another 4-7 dB, and notably +6.6 dB at 100 Hz -- at 256 units, capacity starts to partially overcome the warmup constraint.
+
+**Log sweep is a poor differentiator:** all four models cluster between -38 and -42 dB. The 40-second range pulls the average down at the 100 Hz end where all models are weak, and the slow rate does not test tracking speed. The slow LFO (-40 to -48 dB) is a better proxy for static performance.
+
+**Larger models degrade more under fast modulation.** Run 16 loses only 3.3 dB from its static 1 kHz result to the fast LFO. Run 19, which is 4 dB better statically, collapses by 17.3 dB on the fast LFO and ends up worse than run 16 (-29.4 vs -39.5). Run 20 fares better than run 19 but still loses 11 dB. The accuracy gains from additional capacity appear primarily in static or slowly-varying conditions. Under 5 Hz modulation those gains largely disappear.
+
+**Interpretation:** the model infers the current filter mode by integrating the knob value over time through the GRU hidden state. A static cutoff gives the GRU unlimited time to settle; a 5 Hz LFO forces it to re-converge 10 times per second. Larger models have learned more precise but slower-adapting representations. This is an architectural problem. The conditioning mechanism, not capacity, is the bottleneck. FiLM conditioning addresses this directly by applying scale and shift to the GRU output from the knob in a single step, rather than requiring the GRU to integrate it over time. Variable-parameter training data (LFO sweeps as targets) is also likely necessary.
+
+---
+
 ## Current state
 
-- Run 19 (128 GRU units, 256 warmup, 100Hz floor) is the deployed model: 6-voice polyphony, best accuracy for real-time use
-- Run 20 (256 units) achieves better accuracy but is limited to single voice
+- Run 19 (128 GRU units, 256 warmup, 100Hz floor) is the deployed model: 6-voice polyphony, best static accuracy for real-time use
+- Run 20 (256 units) is better statically but limited to single voice and degrades less gracefully on fast LFO than expected
+- Run 16 (64 units, 256 warmup) is the most dynamically stable: only 3.3 dB gap between static and fast LFO performance
 - The RTNeural build is fully optimized (xsimd + AVX2, pinned in CMakeLists.txt)
-- Knob conditioning is the main architectural weakness: input concatenation is the worst method per literature
-- Dynamic cutoff behavior is completely untested
+- Dynamic eval confirms the conditioning mechanism is the bottleneck: larger models degrade more under fast modulation
 
 ---
 
 ## Next steps
 
-- **Dynamic cutoff testing**: the model has only been evaluated at static cutoffs. Write a script that runs both the C++ Moog reference and the neural model through the same cutoff sweep and compares output. This is the most important unknown before the paper.
-- **FiLM experiment**: modify `tensor_torch_param.py` to replace knob concatenation with post-GRU FiLM conditioning. Train at 64 units. Compare ESR against run 19. If accuracy is comparable, rebuild opcode with 64-unit GRU + FiLM layer and test polyphony.
-- **Knowledge distillation**: if FiLM at 64 units falls short of run 19, add run 19 as teacher to the loss function. Low effort add-on to any new training run.
-- **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets to improve dynamic tracking. Depends on dynamic cutoff test results to know if this is needed.
-- **Paper**: write up for the Csound conference — architecture decisions, ablation results, warmup analysis, and opcode implementation. Dynamic cutoff results and FiLM experiment would strengthen it but current material is already sufficient for submission.
+- **FiLM experiment**: modify `tensor_torch_param.py` to replace knob concatenation with post-GRU FiLM conditioning. Train at 64 units. The hypothesis is that FiLM allows single-step cutoff adaptation instead of requiring the GRU to integrate the knob over time, which should close the static-to-dynamic gap. Compare static and fast LFO ESR against run 16 (the current dynamic benchmark) and run 19 (the static benchmark).
+- **Variable-parameter training data**: LFO-modulated cutoff sweeps as training targets. Necessary regardless of FiLM -- the models were trained on static cutoffs only and the fast LFO degradation partly reflects that distributional mismatch.
+- **Knowledge distillation**: if FiLM at 64 units falls short of run 19 statically, add run 19 as teacher to the loss function. Low effort add-on.
+- **Paper**: write up for the Csound conference -- architecture decisions, ablation results, warmup analysis, opcode implementation, and dynamic eval results. FiLM experiment would be a strong addition but current material is sufficient for submission.

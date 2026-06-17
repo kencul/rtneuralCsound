@@ -18,12 +18,19 @@ add_tool(process_wav)
 add_tool(process_wav_torch)
 add_tool(process_wav_torch_param)
 
-add_executable(moogGen moogGen/main.cpp)
+add_executable(moogGen src/moogGen/main.cpp)
 target_include_directories(moogGen PRIVATE
     ${CMAKE_SOURCE_DIR}/vendor/MoogLadders/src
-    ${CMAKE_SOURCE_DIR}/moogGen
+    ${CMAKE_SOURCE_DIR}/src/moogGen
 )
 target_compile_features(moogGen PRIVATE cxx_std_17)
+
+add_executable(sweep_ref src/moogGen/sweep_ref.cpp)
+target_include_directories(sweep_ref PRIVATE
+    ${CMAKE_SOURCE_DIR}/vendor
+    ${CMAKE_SOURCE_DIR}/vendor/MoogLadders/src
+)
+target_compile_features(sweep_ref PRIVATE cxx_std_17)
 
 # Use headers from the installed Csound to ensure struct layout matches the binary.
 # The DLL must be compiled against the same Csound version it will run with. 

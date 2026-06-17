@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 if len(sys.argv) != 2:
     print(f"Usage: {sys.argv[0]} <output_dir>")
-    print(f"  e.g. {sys.argv[0]} ref/09_moog_20-20k_32u_k2h0_skip")
+    print(f"  e.g. {sys.argv[0]} models/09_moog_20-20k_32u_k2h0_skip")
     sys.exit(1)
 
 OUT_DIR = sys.argv[1]

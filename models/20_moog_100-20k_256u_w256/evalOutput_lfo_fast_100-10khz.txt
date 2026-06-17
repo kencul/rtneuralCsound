@@ -1,0 +1,2 @@
+Ref: bench_mono_lfo_fast_100-10khz.wav
+Overall ESR: -37.3 dB
