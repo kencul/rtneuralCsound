@@ -7,12 +7,12 @@ import time
 import sys
 import os
 from json import JSONEncoder
-from model_concat import Model
+from model_film import Model
 from torch.utils.data import DataLoader, TensorDataset
 
 if len(sys.argv) != 2:
     print(f"Usage: {sys.argv[0]} <output_dir>")
-    print(f"  e.g. {sys.argv[0]} models/09_moog_20-20k_32u_k2h0_skip")
+    print(f"  e.g. {sys.argv[0]} models/21_moog_film_64u_w256")
     sys.exit(1)
 
 OUT_DIR = sys.argv[1]
@@ -49,7 +49,7 @@ class EncodeTensor(JSONEncoder):
         return super().default(obj)
 
 
-GRU_HIDDEN = 256
+GRU_HIDDEN = 64
 
 
 window_size = 8192
@@ -170,7 +170,7 @@ for epoch in range(epochs):
     if val_loss < best_val_loss:
         best_val_loss = val_loss
         epochs_without_improvement = 0
-        torch.save({'model_state': model.state_dict(), 'arch': 'concat', 'gru_hidden': GRU_HIDDEN, 'freq_min': FREQ_MIN, 'freq_max': FREQ_MAX}, os.path.join(OUT_DIR, 'best_model.pt'))
+        torch.save({'model_state': model.state_dict(), 'arch': 'film', 'gru_hidden': GRU_HIDDEN, 'freq_min': FREQ_MIN, 'freq_max': FREQ_MAX}, os.path.join(OUT_DIR, 'best_model.pt'))
     else:
         epochs_without_improvement += 1
 

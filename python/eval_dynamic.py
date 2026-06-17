@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import numpy as np
 import librosa
 import librosa.display
@@ -7,18 +6,16 @@ import matplotlib.pyplot as plt
 import sys
 import os
 
-# Parse --save <dir> before handling positional args
 HELP = """
 Evaluate a trained model against a dynamic-cutoff reference produced by sweep_ref.
 
 Usage:
-  eval_dynamic.py <model.pt> <ref.wav> <ref.csv> [gru_hidden] [warmup] [--save <dir>] [--show]
+  eval_dynamic.py <model.pt> <ref.wav> <ref.csv> [warmup] [--save <dir>] [--show]
 
 Arguments:
   model.pt      Path to the trained model checkpoint (.pt)
   ref.wav       Reference WAV produced by sweep_ref
   ref.csv       Companion knob schedule CSV produced by sweep_ref (normalized 0-1 values)
-  gru_hidden    GRU hidden size matching the checkpoint (default: 128)
   warmup        Warmup samples fed to the GRU before scoring (default: 256)
 
 Flags:
@@ -30,7 +27,7 @@ Flags:
 
 SHOW_PLOT = '--show' in sys.argv
 FORCE     = '--force' in sys.argv
-SAVE_DIR = None
+SAVE_DIR  = None
 if '--save' in sys.argv:
     idx = sys.argv.index('--save')
     if idx + 1 >= len(sys.argv):
@@ -53,39 +50,20 @@ if len(_args) < 4:
 MODEL_PATH = _args[1]
 REF_WAV    = _args[2]
 REF_CSV    = _args[3]
-GRU_HIDDEN = int(_args[4]) if len(_args) > 4 else 128
-WARMUP     = int(_args[5]) if len(_args) > 5 else 256
+WARMUP     = int(_args[4]) if len(_args) > 4 else 256
 DRY_PATH   = "audio/bench_mono.wav"
 WINDOW     = 8192
 
 
-class CausalConv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size):
-        super().__init__()
-        self.padding = kernel_size - 1
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size)
-
-    def forward(self, x):
-        x = nn.functional.pad(x, (self.padding, 0))
-        return self.conv(x)
-
-
-class Model(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv  = CausalConv1d(1, 16, 31)
-        self.gru   = nn.GRU(17, GRU_HIDDEN, batch_first=True)
-        self.dense = nn.Linear(GRU_HIDDEN, 1)
-
-    def forward(self, x, h=None):
-        audio = x[:, :, :1]
-        knob  = x[:, :, 1:]
-        conv_out = audio.permute(0, 2, 1)
-        conv_out = self.conv(conv_out)
-        conv_out = conv_out.permute(0, 2, 1)
-        gru_in   = torch.cat([conv_out, knob], dim=-1)
-        out, h   = self.gru(gru_in, h)
-        return self.dense(out) + audio, h
+def load_checkpoint(path, device):
+    ckpt = torch.load(path, map_location=device)
+    if 'model_state' in ckpt:
+        return ckpt['model_state'], ckpt['arch'], ckpt['gru_hidden']
+    # legacy checkpoint: infer from GRU weight shape
+    ih         = ckpt['gru.weight_ih_l0']  # (3*hidden, input_size)
+    gru_hidden = ih.shape[0] // 3
+    arch       = 'concat' if ih.shape[1] == 17 else 'film'
+    return ckpt, arch, gru_hidden
 
 
 def load_knob_schedule(csv_path):
@@ -141,10 +119,19 @@ def confirm_overwrite(save_dir, filenames):
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Device: {device}  |  GRU: {GRU_HIDDEN} units  |  Warmup: {WARMUP}")
 
-    model = Model().to(device)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+    state_dict, arch, gru_hidden = load_checkpoint(MODEL_PATH, device)
+    print(f"Device: {device}  |  arch={arch}  gru_hidden={gru_hidden}  warmup={WARMUP}")
+
+    if arch == 'film':
+        from model_film import Model
+        # film weight shape [2*16, 1] = pre-GRU; [2*gru_hidden, 1] = post-GRU
+        film_pre = state_dict['film.weight'].shape[0] == 32
+        model = Model(gru_hidden=gru_hidden, film_pre=film_pre).to(device)
+    else:
+        from model_concat import Model
+        model = Model(gru_hidden=gru_hidden).to(device)
+    model.load_state_dict(state_dict)
     model.eval()
 
     dry,  sr = librosa.load(DRY_PATH, sr=None, mono=True)
@@ -193,7 +180,6 @@ def main():
 
     ref_stem   = os.path.splitext(os.path.basename(REF_WAV))[0]
     model_stem = os.path.splitext(os.path.basename(MODEL_PATH))[0]
-    # Strip the common "bench_mono_" prefix so output names stay short
     sweep_name = ref_stem.replace('bench_mono_', '', 1)
     plt.suptitle(f'{ref_stem}  |  {model_stem}', fontsize=11)
     plt.tight_layout()
