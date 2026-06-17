@@ -441,7 +441,7 @@ The `Model` class was duplicated across `tensor_torch_param.py`, `eval_param_mod
 **New structure:** each architecture lives in its own file:
 
 - `model_concat.py` — knob-concatenation architecture (all runs 11–20)
-- `model_film.py` — FiLM conditioning architecture (upcoming)
+- `model_film.py` — FiLM conditioning architecture (pre- and post-GRU placements, experiments complete)
 
 Both define `Model(gru_hidden)` and return `(output, h)` from `forward()` so eval scripts can carry GRU hidden state across chunks. The training and eval scripts import from these files directly.
 

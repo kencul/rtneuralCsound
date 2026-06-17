@@ -11,8 +11,9 @@ Research into neural network audio effect modeling using RTNeural, working towar
 ├── models/                             # Trained model checkpoints by run number
 ├── python/
 │   ├── model_concat.py                 # Knob-concatenation model architecture
-│   ├── model_film.py                   # FiLM conditioning model architecture
-│   ├── tensor_torch_param.py           # Training script
+│   ├── model_film.py                   # FiLM conditioning model architecture (pre- and post-GRU)
+│   ├── tensor_torch_param.py           # Training script (concat architecture)
+│   ├── tensor_torch_film.py            # Training script (FiLM architecture)
 │   ├── eval_param_model.py             # Static cutoff evaluation
 │   ├── eval_dynamic.py                 # Dynamic cutoff evaluation (sweep/LFO)
 │   └── compareSpectrum.py              # Spectrogram comparison tool
@@ -109,8 +110,14 @@ pip install -r requirements.txt
 Train:
 
 ```bash
+# Concatenation architecture (runs 16-20)
 python python/tensor_torch_param.py models/my_run
+
+# FiLM architecture (runs 21-22)
+python python/tensor_torch_film.py models/my_run
 ```
+
+Architecture and hyperparameters (`GRU_HIDDEN`, `warmup_size`, `CUTOFF_FREQS`) are set at the top of each training script. Checkpoints embed `arch`, `gru_hidden`, `freq_min`, and `freq_max` so eval scripts auto-detect the model configuration.
 
 ## Evaluation
 
@@ -155,7 +162,7 @@ python python/eval_dynamic.py models/my_run/best_model.pt \
 
 Two architectures are implemented in `python/model_concat.py` and `python/model_film.py`.
 
-**Concatenation** (`model_concat.py`) — all trained runs to date:
+**Concatenation** (`model_concat.py`) — runs 11-20, current deployed architecture:
 ```
 Input audio ──┐
    |          |
@@ -168,18 +175,20 @@ GRU           |
 Dense ────────+──> Output
 ```
 
-**FiLM** (`model_film.py`) — upcoming experiment:
+**FiLM** (`model_film.py`) — runs 21-22, experiments complete:
 ```
 Input audio ──┐
    |          |
 Conv1d (16ch) | skip connection
    |          |
-GRU           |
+FiLM(knob)    |  (scale + shift applied to conv features, pre-GRU)
    |          |
-FiLM(knob) ──>|  (scale + shift from knob, applied post-GRU)
+GRU           |
    |          |
 Dense ────────+──> Output
 ```
+
+Pre-GRU FiLM (run 22) matched concat at the same unit count statically but did not improve dynamic tracking under fast modulation. Post-GRU FiLM (run 21) failed to learn. Concat remains the architecture of record.
 
 The knob is log-normalized to [0, 1] over 100Hz–20kHz. The deployed model is run 19 (`model_concat`, 128 GRU units, 256-sample warmup). See [devlog/DEVLOG2.md](devlog/DEVLOG2.md) for the full experiment history.
 
@@ -197,9 +206,9 @@ See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working exa
 
 ## Next steps
 
-- FiLM conditioning experiment: replace knob concatenation with post-GRU FiLM, train at 64 units
-- Variable-parameter training data: LFO-modulated cutoff sweeps as training targets
+- Variable-parameter training data: mix LFO-swept cutoff targets into training to address fast-modulation degradation
 - Paper: Csound conference writeup
+- ~~FiLM conditioning experiment~~ -- complete (runs 21-22); pre-GRU FiLM matched concat statically but did not improve dynamic tracking
 - ~~Csound opcode implementation~~ -- done, see `src/csound_opcode/`
 - ~~Architecture sweet spot -- 64 GRU units with `knob_to_h0`~~ -- trained (run 14), ablation complete
 - ~~Dynamic cutoff eval~~ -- done, see `eval_dynamic.py`
