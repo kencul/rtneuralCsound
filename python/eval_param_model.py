@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import numpy as np
 import librosa
 import librosa.display
@@ -7,29 +6,26 @@ import matplotlib.pyplot as plt
 import sys
 import os
 
-# Parse --save <dir> before handling positional args
 HELP = """
 Evaluate a trained model against static Moog reference files at a grid of cutoff frequencies.
 
 Usage:
-  eval_param_model.py <model.pt> [warmup] [freq_min] [gru_hidden] [--save <dir>] [--show]
+  eval_param_model.py <model.pt> [warmup] [--save <dir>] [--show] [--force]
 
 Arguments:
-  model.pt      Path to the trained model checkpoint (.pt)
-  warmup        Warmup samples fed to the GRU before scoring (default: 2048)
-  freq_min      Lowest cutoff frequency to evaluate in Hz (default: 20)
-  gru_hidden    GRU hidden size matching the checkpoint (default: 128)
+  model.pt    Path to trained model checkpoint (.pt)
+  warmup      Warmup samples fed to GRU before scoring (default: 256)
 
 Flags:
   --save <dir>  Write evalOutput.txt and evalOutput.png to <dir>
-  --force       Overwrite existing output files without prompting
+  --force       Overwrite existing files without prompting
   --show        Open the interactive plot window
   --help, -h    Show this message
 """.strip()
 
 SHOW_PLOT = '--show' in sys.argv
 FORCE     = '--force' in sys.argv
-SAVE_DIR = None
+SAVE_DIR  = None
 if '--save' in sys.argv:
     idx = sys.argv.index('--save')
     if idx + 1 >= len(sys.argv):
@@ -49,61 +45,37 @@ if len(_args) < 2:
     print(HELP)
     sys.exit(1)
 
-FREQ_MIN   = float(_args[3]) if len(_args) > 3 else 20.0
-FREQ_MAX   = 20000.0
-GRU_HIDDEN = int(_args[4])   if len(_args) > 4 else 128
-
-ALL_CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
-CUTOFF_FREQS = [f for f in ALL_CUTOFF_FREQS if f >= FREQ_MIN]
-
 MODEL_PATH  = _args[1]
-DRY_PATH    = "audio/bench_mono.wav"
-WET_DIR     = "audio/filteredOutput/bench"
-WET_PATTERN = "bench_mono_{freq}hz.wav"
+warmup_size = int(_args[2]) if len(_args) > 2 else 256
 
-window_size = 8192
-warmup_size = int(_args[2]) if len(_args) > 2 else 2048
-
-
-def normalize_knob(freq_hz):
-    return (np.log(freq_hz) - np.log(FREQ_MIN)) / (np.log(FREQ_MAX) - np.log(FREQ_MIN))
+DRY_PATH         = "audio/bench_mono.wav"
+WET_DIR          = "audio/filteredOutput/bench"
+WET_PATTERN      = "bench_mono_{freq}hz.wav"
+ALL_CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
+window_size      = 8192
 
 
-class CausalConv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size):
-        super().__init__()
-        self.padding = kernel_size - 1
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size)
+def load_checkpoint(path, device):
+    ckpt = torch.load(path, map_location=device)
+    if 'model_state' in ckpt:
+        return (ckpt['model_state'], ckpt['arch'], ckpt['gru_hidden'],
+                ckpt.get('freq_min', 100.0), ckpt.get('freq_max', 20000.0))
+    # legacy checkpoint: infer arch and hidden size from GRU weight shape
+    ih         = ckpt['gru.weight_ih_l0']  # shape (3*hidden, input_size)
+    gru_hidden = ih.shape[0] // 3
+    arch       = 'concat' if ih.shape[1] == 17 else 'film'
+    return ckpt, arch, gru_hidden, 100.0, 20000.0
 
-    def forward(self, x):
-        x = nn.functional.pad(x, (self.padding, 0))
-        return self.conv(x)
 
-
-class Model(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv  = CausalConv1d(in_channels=1, out_channels=16, kernel_size=31)
-        self.gru   = nn.GRU(17, GRU_HIDDEN, batch_first=True)
-        self.dense = nn.Linear(GRU_HIDDEN, 1)
-
-    def forward(self, x, h=None):
-        audio = x[:, :, :1]
-        knob  = x[:, :, 1:]
-        conv_out = audio.permute(0, 2, 1)
-        conv_out = self.conv(conv_out)
-        conv_out = conv_out.permute(0, 2, 1)
-        gru_input = torch.cat([conv_out, knob], dim=-1)
-        out, h_out = self.gru(gru_input, h)
-        return self.dense(out) + audio, h_out
+def normalize_knob(freq_hz, freq_min, freq_max):
+    return (np.log(freq_hz) - np.log(freq_min)) / (np.log(freq_max) - np.log(freq_min))
 
 
 def run_model_on_audio(model, dry, knob_val, device):
-    n = len(dry)
+    n            = len(dry)
     knob_channel = np.ones(n, dtype=np.float32) * knob_val
-    x = np.stack([dry, knob_channel], axis=-1)
-
-    output = np.zeros(n, dtype=np.float32)
+    x            = np.stack([dry, knob_channel], axis=-1)
+    output       = np.zeros(n, dtype=np.float32)
 
     xb = torch.tensor(x[:warmup_size], dtype=torch.float32).unsqueeze(0).to(device)
     with torch.no_grad():
@@ -142,12 +114,20 @@ def confirm_overwrite(save_dir):
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
 
-    model = Model().to(device)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+    state_dict, arch, gru_hidden, freq_min, freq_max = load_checkpoint(MODEL_PATH, device)
+    print(f"arch={arch}  gru_hidden={gru_hidden}  freq_min={freq_min:.0f}  warmup={warmup_size}")
+
+    if arch == 'film':
+        from model_film import Model
+    else:
+        from model_concat import Model
+
+    model = Model(gru_hidden=gru_hidden).to(device)
+    model.load_state_dict(state_dict)
     model.eval()
 
+    cutoff_freqs = [f for f in ALL_CUTOFF_FREQS if f >= freq_min]
     dry, sr = librosa.load(DRY_PATH, sr=None, mono=True)
 
     header = f"{'Freq (Hz)':>10}  {'ESR':>8}  {'ESR (dB)':>10}  {'Status'}"
@@ -156,19 +136,16 @@ def main():
     table_lines = [header, sep]
 
     results = []
-    for freq in CUTOFF_FREQS:
+    for freq in cutoff_freqs:
         wet_path = f"{WET_DIR}/{WET_PATTERN.format(freq=freq)}"
         wet, _ = librosa.load(wet_path, sr=sr, mono=True)
 
-        n = min(len(dry), len(wet))
-        dry_ = dry[:n]
-        wet_ = wet[:n]
-
-        knob    = normalize_knob(freq)
-        pred    = run_model_on_audio(model, dry_, knob, device)
-        esr_val = esr(pred[warmup_size:], wet_[warmup_size:])
+        n       = min(len(dry), len(wet))
+        knob    = normalize_knob(freq, freq_min, freq_max)
+        pred    = run_model_on_audio(model, dry[:n], knob, device)
+        esr_val = esr(pred[warmup_size:], wet[:n][warmup_size:])
         esr_db  = 10 * np.log10(esr_val) if esr_val > 0 else float('-inf')
-        results.append((freq, pred[:n], wet_[:n], esr_db))
+        results.append((freq, pred[:n], wet[:n], esr_db))
 
         status = "good" if esr_db < -20 else ("ok" if esr_db < -10 else "poor")
         row = f"{freq:>10}  {esr_val:>8.4f}  {esr_db:>9.1f}dB  {status}"
@@ -177,7 +154,6 @@ def main():
 
     print()
 
-    # Spectrograms at the frequency closest to 1kHz
     plot_idx = min(range(len(results)), key=lambda i: abs(results[i][0] - 1000))
     plot_freq, plot_pred, plot_ref, _ = results[plot_idx]
     scored_pred = plot_pred[warmup_size:]

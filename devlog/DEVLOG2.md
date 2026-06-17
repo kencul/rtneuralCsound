@@ -393,6 +393,81 @@ Static and dynamic evals run across all four 100Hz-floor models.
 
 **Interpretation:** the model infers the current filter mode by integrating the knob value over time through the GRU hidden state. A static cutoff gives the GRU unlimited time to settle; a 5 Hz LFO forces it to re-converge 10 times per second. Larger models have learned more precise but slower-adapting representations. This is an architectural problem. The conditioning mechanism, not capacity, is the bottleneck. FiLM conditioning addresses this directly by applying scale and shift to the GRU output from the knob in a single step, rather than requiring the GRU to integrate it over time. Variable-parameter training data (LFO sweeps as targets) is also likely necessary.
 
+## FiLM Conditioning Implementation Plan
+### Context
+
+Dynamic eval (DEVLOG2) showed the current knob-concatenation approach causes large degradation under fast modulation — run 19 drops 17 dB on the 5 Hz LFO. The GRU must integrate the knob value over time through hidden state to infer the current filter mode; fast sweeps don't give it enough settling time. FiLM applies scale and shift to GRU outputs in a single step, making conditioning speed-independent.
+
+### Design Decisions (backed by SMC 2024 — Simionato & Fasciani)
+
+https://smcnetwork.org/smc2024/papers/SMC2024_paper_id83.pdf
+
+- Post-GRU placement The paper tested pre, post, and pre-post placements across all conditioning methods. Post (after the recurrent layer, before Dense) was the consistent winner for compressor-like effects. The paper's reasoning: "it is more beneficial for the networks to use the information given by the control parameters to project the output of the [state] layer... rather than influencing the inference of the recurrent layer." A Moog filter is closer to a compressor than an overdrive, so post applies.
+
+- Naked FiLM (no GLU gate) The paper's FiLM-GLU adds a softsign gate after the affine transform, which lets the network learn to suppress conditioning when irrelevant. For a Moog with a single always-active cutoff knob, there is no "ignore the knob" case — the gate has nothing to do. The simplest form (output = γ ⊙ x + β) is sufficient and adds fewer parameters.
+
+- Linear FiLM (not cubic/quintic) The paper tested odd-order nonlinear transforms inside FiLM and found they help for overdrive — where the parameter-to-response relationship is strongly nonlinear — but not for compressors. The Moog cutoff knob is already log-normalized so its relationship to the sonic response is approximately linear in model input space. No nonlinear transform.
+
+- 64 GRU units Hypothesis from DEVLOG2: the GRU currently spends capacity integrating the knob through time. With FiLM handling conditioning in a single step, a 64-unit GRU should match larger concatenation-based models dynamically. This makes run 16 (64u, concatenation) the direct static comparison and run 19 (128u, concatenation) the dynamic comparison target.
+
+### Plan Outline
+
+1. tensor_torch_param.py
+   - GRU_HIDDEN: 256 → 64
+   - Model: GRU input 17 → 16 (remove knob channel)
+   - Model: add self.film = nn.Linear(1, 2 * GRU_HIDDEN)
+   - forward(): run GRU on conv_out only, apply FiLM post-GRU, then Dense + skip
+
+2. eval_param_model.py
+   - Same Model change (also returns h for stateful chunk inference)
+
+3. eval_dynamic.py
+   - Same Model change
+
+4. moognn.cpp
+   - Add constexpr GRU_H = 64
+   - Add FiLM struct: weight[2*H], bias[2*H], compute(knob, gamma, beta)
+   - Split RecurrentStage (GRU+Dense) → GRUStage + DenseStage (FiLM goes between)
+   - init(): load film.weight (shape [2H,1] → flatten) and film.bias from JSON
+   - aperf(): compute gamma/beta once per block (k-rate), apply per-sample between GRU and Dense
+
+
+---
+
+## Python tooling refactor
+
+The `Model` class was duplicated across `tensor_torch_param.py`, `eval_param_model.py`, and `eval_dynamic.py`. Any architecture change required touching all three files in sync — a practical problem when adding FiLM conditioning, which changes the model signature enough that a shape mismatch would silently corrupt eval results if one file was missed.
+
+**New structure:** each architecture lives in its own file:
+
+- `model_concat.py` — knob-concatenation architecture (all runs 11–20)
+- `model_film.py` — FiLM conditioning architecture (upcoming)
+
+Both define `Model(gru_hidden)` and return `(output, h)` from `forward()` so eval scripts can carry GRU hidden state across chunks. The training and eval scripts import from these files directly.
+
+**Checkpoint format updated.** New checkpoints embed arch metadata:
+
+```python
+{'model_state': ..., 'arch': 'concat', 'gru_hidden': 128, 'freq_min': 100.0, 'freq_max': 20000.0}
+```
+
+Eval scripts auto-detect architecture and hidden size from the checkpoint. Legacy checkpoints (runs 11–20, raw state dicts) are handled by inferring arch from GRU input width (17 = concat, 16 = film) and hidden size from `weight_ih_l0` shape.
+
+**Updated eval usage.** The `gru_hidden` and `freq_min` positional args are removed from both eval scripts — they now come from the checkpoint. `warmup` default updated from 2048 → 256 in `eval_param_model.py` to match current short-warmup runs.
+
+```bash
+python eval_param_model.py <model.pt> [warmup] [--save <dir>] [--show]
+python eval_dynamic.py     <model.pt> <ref.wav> <ref.csv> [warmup] [--save <dir>] [--show]
+```
+
+Verified on runs 16 and 19: ESR numbers match prior results exactly.
+
+With the model files in place, adding a new architecture for training is two lines: import the right model file and set `GRU_HIDDEN`. `tensor_torch_film.py` is the FiLM training script — identical to `tensor_torch_param.py` except it imports from `model_film` and sets `GRU_HIDDEN = 64`. The checkpoint it saves is tagged `'arch': 'film'` so eval scripts auto-detect it.
+
+```bash
+env/Scripts/python.exe python/tensor_torch_film.py models/21_moog_film_64u_w256
+```
+
 ---
 
 ## Current state

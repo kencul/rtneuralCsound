@@ -10,7 +10,9 @@ Research into neural network audio effect modeling using RTNeural, working towar
 │   └── filteredOutput/bench/           # Moog-filtered outputs (static and dynamic)
 ├── models/                             # Trained model checkpoints by run number
 ├── python/
-│   ├── tensor_torch_param.py           # Training script (parameterized model)
+│   ├── model_concat.py                 # Knob-concatenation model architecture
+│   ├── model_film.py                   # FiLM conditioning model architecture
+│   ├── tensor_torch_param.py           # Training script
 │   ├── eval_param_model.py             # Static cutoff evaluation
 │   ├── eval_dynamic.py                 # Dynamic cutoff evaluation (sweep/LFO)
 │   └── compareSpectrum.py              # Spectrogram comparison tool
@@ -119,11 +121,11 @@ Both eval scripts produce a 4-panel plot (reference spectrogram, model output sp
 Runs the model at a grid of fixed cutoff frequencies and reports ESR for each. The fourth panel shows ESR vs frequency on a log scale.
 
 ```bash
-python python/eval_param_model.py <model.pt> [warmup] [freq_min] [gru_hidden] [--save <dir>] [--show]
+python python/eval_param_model.py <model.pt> [warmup] [--save <dir>] [--show]
 ```
 
 ```bash
-python python/eval_param_model.py models/my_run/best_model.pt 256 100
+python python/eval_param_model.py models/my_run/best_model.pt
 ```
 
 ### Dynamic cutoff eval
@@ -131,7 +133,7 @@ python python/eval_param_model.py models/my_run/best_model.pt 256 100
 Runs the model with a time-varying knob schedule from a sweep_ref CSV and compares against the companion reference WAV. The fourth panel shows windowed ESR over time (0.5s windows).
 
 ```bash
-python python/eval_dynamic.py <model.pt> <ref.wav> <ref.csv> [gru_hidden] [warmup] [--save <dir>] [--show]
+python python/eval_dynamic.py <model.pt> <ref.wav> <ref.csv> [warmup] [--save <dir>] [--show]
 ```
 
 ```bash
@@ -151,21 +153,35 @@ python python/eval_dynamic.py models/my_run/best_model.pt \
 
 ## Model architecture
 
+Two architectures are implemented in `python/model_concat.py` and `python/model_film.py`.
+
+**Concatenation** (`model_concat.py`) — all trained runs to date:
 ```
-Input audio (1 sample) ──┐
-   |                     |
-Conv1d (16ch, k=31)      |
-   |                     | skip connection
-LayerNorm                |
-   |                     |
-concat(knob 0-1)         |
-   |                     |
-GRU (128 units)          |
-   |                     |
-Dense (1 output) ────────+──> Output
+Input audio ──┐
+   |          |
+Conv1d (16ch) | skip connection
+   |          |
+concat(knob)  |
+   |          |
+GRU           |
+   |          |
+Dense ────────+──> Output
 ```
 
-The knob input is a log-normalized value in [0, 1] mapping 100Hz to 20kHz. The deployed model is run 19: 128 GRU units, 256-sample training warmup, 100Hz frequency floor, no knob_to_h0. See [devlog/DEVLOG2.md](devlog/DEVLOG2.md) for the full experiment history and ablation results.
+**FiLM** (`model_film.py`) — upcoming experiment:
+```
+Input audio ──┐
+   |          |
+Conv1d (16ch) | skip connection
+   |          |
+GRU           |
+   |          |
+FiLM(knob) ──>|  (scale + shift from knob, applied post-GRU)
+   |          |
+Dense ────────+──> Output
+```
+
+The knob is log-normalized to [0, 1] over 100Hz–20kHz. The deployed model is run 19 (`model_concat`, 128 GRU units, 256-sample warmup). See [devlog/DEVLOG2.md](devlog/DEVLOG2.md) for the full experiment history.
 
 ## Csound opcode
 
