@@ -12,6 +12,7 @@ Research into neural network audio effect modeling using RTNeural, working towar
 ├── python/
 │   ├── tensor_torch_param.py           # Training script (parameterized model)
 │   ├── eval_param_model.py             # Static cutoff evaluation
+│   ├── eval_dynamic.py                 # Dynamic cutoff evaluation (sweep/LFO)
 │   └── compareSpectrum.py              # Spectrogram comparison tool
 ├── src/
 │   ├── moogGen/
@@ -109,11 +110,44 @@ Train:
 python python/tensor_torch_param.py models/my_run
 ```
 
-Evaluate at static cutoffs:
+## Evaluation
+
+Both eval scripts produce a 4-panel plot (reference spectrogram, model output spectrogram, difference spectrogram, ESR metric) and print results to stdout. Pass `--help` to either script for full usage.
+
+### Static cutoff eval
+
+Runs the model at a grid of fixed cutoff frequencies and reports ESR for each. The fourth panel shows ESR vs frequency on a log scale.
 
 ```bash
-python python/eval_param_model.py models/my_run/best_model.pt [warmup_samples] [freq_min]
+python python/eval_param_model.py <model.pt> [warmup] [freq_min] [gru_hidden] [--save <dir>] [--show]
 ```
+
+```bash
+python python/eval_param_model.py models/my_run/best_model.pt 256 100
+```
+
+### Dynamic cutoff eval
+
+Runs the model with a time-varying knob schedule from a sweep_ref CSV and compares against the companion reference WAV. The fourth panel shows windowed ESR over time (0.5s windows).
+
+```bash
+python python/eval_dynamic.py <model.pt> <ref.wav> <ref.csv> [gru_hidden] [warmup] [--save <dir>] [--show]
+```
+
+```bash
+python python/eval_dynamic.py models/my_run/best_model.pt \
+    audio/filteredOutput/bench/bench_mono_lfo_fast_100-10khz.wav \
+    audio/filteredOutput/bench/bench_mono_lfo_fast_100-10khz.csv
+```
+
+### Flags (both scripts)
+
+| Flag | Description |
+|------|-------------|
+| `--save <dir>` | Write eval output to `<dir>`. Static eval writes `evalOutput.txt/.png`. Dynamic eval uses sweep-specific names (e.g. `evalOutput_lfo_fast_100-10khz.txt`) so multiple sweeps can share a model directory. |
+| `--force` | Overwrite existing output files without prompting. Useful for batch runs. |
+| `--show` | Open the interactive plot window. |
+| `--help`, `-h` | Print usage. |
 
 ## Model architecture
 
@@ -147,14 +181,12 @@ See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working exa
 
 ## Next steps
 
-- Write `eval_dynamic.py` to compare neural model output against sweep_ref on the dynamic cutoff files
 - FiLM conditioning experiment: replace knob concatenation with post-GRU FiLM, train at 64 units
+- Variable-parameter training data: LFO-modulated cutoff sweeps as training targets
 - Paper: Csound conference writeup
-- Dynamic cutoff testing -- the model has only been evaluated on static cutoffs so far
-- ~~Csound opcode implementation (must-have for the conference paper)~~ -- done, see `src/csound_opcode/`
+- ~~Csound opcode implementation~~ -- done, see `src/csound_opcode/`
 - ~~Architecture sweet spot -- 64 GRU units with `knob_to_h0`~~ -- trained (run 14), ablation complete
-- Variable-parameter training data with sweeps and modulation
-- Fix per-note click on cold start without an always-on send effect workaround
+- ~~Dynamic cutoff eval~~ -- done, see `eval_dynamic.py`
 
 ## References
 
