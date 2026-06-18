@@ -6,13 +6,20 @@ Research into neural network audio effect modeling using RTNeural, working towar
 
 ```
 ├── audio/
-│   ├── bench_mono.wav                  # Primary training/eval input
-│   └── filteredOutput/bench/           # Moog-filtered outputs (static and dynamic)
+│   ├── bench_mono.wav                  # Validation audio
+│   ├── testSound_mono.wav              # Training audio
+│   ├── ruin_mono.wav                   # Held-out eval audio (never used in training/validation)
+│   └── filteredOutput/
+│       ├── bench/                      # Moog-filtered outputs for validation
+│       ├── testSound/                  # Moog-filtered outputs for training
+│       └── ruin/                       # Moog-filtered outputs for held-out eval
 ├── models/                             # Trained model checkpoints by run number
 ├── python/
 │   ├── model_concat.py                 # Knob-concatenation model architecture
-│   ├── model_film.py                   # FiLM conditioning model architecture
-│   ├── tensor_torch_param.py           # Training script
+│   ├── model_film.py                   # FiLM conditioning model architecture (pre- and post-GRU)
+│   ├── tensor_torch_param.py           # Training script (concat architecture, static data)
+│   ├── tensor_torch_film.py            # Training script (FiLM architecture)
+│   ├── tensor_torch_variable.py        # Training script (concat architecture, static + LFO data)
 │   ├── eval_param_model.py             # Static cutoff evaluation
 │   ├── eval_dynamic.py                 # Dynamic cutoff evaluation (sweep/LFO)
 │   └── compareSpectrum.py              # Spectrogram comparison tool
@@ -73,7 +80,7 @@ Filters a WAV through the RK Moog ladder at a fixed grid of cutoff frequencies. 
 build/bin/Release/moogGen.exe -f audio/bench_mono.wav -o audio/filteredOutput/bench
 ```
 
-Generates one WAV per cutoff: `bench_mono_100hz.wav`, `bench_mono_1000hz.wav`, etc.
+Generates one WAV per cutoff: `bench_mono_100hz.wav`, `bench_mono_1000hz.wav`, etc. Run against each audio file (`bench_mono.wav`, `testSound_mono.wav`, `ruin_mono.wav`) and direct output to the matching `filteredOutput/` subdirectory.
 
 ### sweep_ref -- dynamic cutoff reference
 
@@ -87,13 +94,7 @@ build/bin/Release/sweep_ref.exe audio/bench_mono.wav out.wav out.csv log 100 200
 build/bin/Release/sweep_ref.exe audio/bench_mono.wav out.wav out.csv lfo 100 10000 [resonance=1.0] [lfo_rate_hz=1.0]
 ```
 
-Pre-generated reference files in `audio/filteredOutput/bench/`:
-
-| File | Type | Range | Rate |
-|------|------|-------|------|
-| `bench_mono_sweep_log_100-20000hz` | log sweep | 100Hz to 20kHz | once over 40s |
-| `bench_mono_lfo_slow_100-10000hz` | LFO | 100Hz to 10kHz | 0.25Hz (4s period) |
-| `bench_mono_lfo_fast_100-10000hz` | LFO | 100Hz to 10kHz | 5Hz (0.2s period) |
+Pre-generated reference files exist for bench, testSound, and ruin at LFO rates of 1, 2, 5, 10, and 20 Hz (100Hz-10kHz, resonance=0.5). bench also has a 0.25Hz slow LFO and a 40-second log sweep.
 
 ## Training
 
@@ -109,8 +110,19 @@ pip install -r requirements.txt
 Train:
 
 ```bash
+# Static training data only (runs 16-20)
 python python/tensor_torch_param.py models/my_run
+
+# Static + LFO variable training data (run 23+)
+python python/tensor_torch_variable.py models/my_run
+
+# FiLM architecture (runs 21-22)
+python python/tensor_torch_film.py models/my_run
 ```
+
+Architecture and hyperparameters (`GRU_HIDDEN`, `warmup_size`, `CUTOFF_FREQS`) are set at the top of each training script. Checkpoints embed `arch`, `gru_hidden`, `freq_min`, and `freq_max` so eval scripts auto-detect the model configuration.
+
+`tensor_torch_variable.py` trains on static cutoffs from `testSound` plus LFO-swept targets from `testSound` and validates against static bench cutoffs plus the bench 5Hz LFO. Additional LFO rates can be added to `VARIABLE_TRAIN_FILES` or `VARIABLE_VAL_FILES`.
 
 ## Evaluation
 
@@ -121,32 +133,46 @@ Both eval scripts produce a 4-panel plot (reference spectrogram, model output sp
 Runs the model at a grid of fixed cutoff frequencies and reports ESR for each. The fourth panel shows ESR vs frequency on a log scale.
 
 ```bash
-python python/eval_param_model.py <model.pt> [warmup] [--save <dir>] [--show]
+python python/eval_param_model.py <model.pt> [warmup] [--dry <path>] [--save <dir>] [--show]
 ```
 
 ```bash
+# Default: evaluates against bench
 python python/eval_param_model.py models/my_run/best_model.pt
+
+# Held-out eval set
+python python/eval_param_model.py models/my_run/best_model.pt --dry audio/ruin_mono.wav
 ```
+
+The `--dry` flag sets the dry audio file. The wet directory and filename pattern are derived from the stem automatically (e.g. `audio/ruin_mono.wav` resolves to `audio/filteredOutput/ruin/ruin_mono_{freq}hz.wav`). Output files include the stem suffix when non-default (`evalOutput_ruin_mono.txt`).
 
 ### Dynamic cutoff eval
 
 Runs the model with a time-varying knob schedule from a sweep_ref CSV and compares against the companion reference WAV. The fourth panel shows windowed ESR over time (0.5s windows).
 
 ```bash
-python python/eval_dynamic.py <model.pt> <ref.wav> <ref.csv> [warmup] [--save <dir>] [--show]
+python python/eval_dynamic.py <model.pt> <ref.wav> <ref.csv> [warmup] [--dry <path>] [--save <dir>] [--show]
 ```
 
 ```bash
+# Default: uses bench_mono.wav as dry signal
 python python/eval_dynamic.py models/my_run/best_model.pt \
     audio/filteredOutput/bench/bench_mono_lfo_fast_100-10khz.wav \
     audio/filteredOutput/bench/bench_mono_lfo_fast_100-10khz.csv
+
+# Held-out eval set
+python python/eval_dynamic.py models/my_run/best_model.pt \
+    audio/filteredOutput/ruin/ruin_mono_lfo_5hz_100-10khz.wav \
+    audio/filteredOutput/ruin/ruin_mono_lfo_5hz_100-10khz.csv \
+    --dry audio/ruin_mono.wav
 ```
 
 ### Flags (both scripts)
 
 | Flag | Description |
 |------|-------------|
-| `--save <dir>` | Write eval output to `<dir>`. Static eval writes `evalOutput.txt/.png`. Dynamic eval uses sweep-specific names (e.g. `evalOutput_lfo_fast_100-10khz.txt`) so multiple sweeps can share a model directory. |
+| `--dry <path>` | Dry audio file. Defaults to `audio/bench_mono.wav`. |
+| `--save <dir>` | Write eval output to `<dir>`. Static eval writes `evalOutput[_stem].txt/.png`. Dynamic eval uses sweep-specific names so multiple sweeps can share a model directory. |
 | `--force` | Overwrite existing output files without prompting. Useful for batch runs. |
 | `--show` | Open the interactive plot window. |
 | `--help`, `-h` | Print usage. |
@@ -155,7 +181,7 @@ python python/eval_dynamic.py models/my_run/best_model.pt \
 
 Two architectures are implemented in `python/model_concat.py` and `python/model_film.py`.
 
-**Concatenation** (`model_concat.py`) — all trained runs to date:
+**Concatenation** (`model_concat.py`) — runs 11-20, current deployed architecture:
 ```
 Input audio ──┐
    |          |
@@ -168,20 +194,22 @@ GRU           |
 Dense ────────+──> Output
 ```
 
-**FiLM** (`model_film.py`) — upcoming experiment:
+**FiLM** (`model_film.py`) — runs 21-22, experiments complete:
 ```
 Input audio ──┐
    |          |
 Conv1d (16ch) | skip connection
    |          |
-GRU           |
+FiLM(knob)    |  (scale + shift applied to conv features, pre-GRU)
    |          |
-FiLM(knob) ──>|  (scale + shift from knob, applied post-GRU)
+GRU           |
    |          |
 Dense ────────+──> Output
 ```
 
-The knob is log-normalized to [0, 1] over 100Hz–20kHz. The deployed model is run 19 (`model_concat`, 128 GRU units, 256-sample warmup). See [devlog/DEVLOG2.md](devlog/DEVLOG2.md) for the full experiment history.
+Pre-GRU FiLM (run 22) matched concat at the same unit count statically but did not improve dynamic tracking under fast modulation. Post-GRU FiLM (run 21) failed to learn. Concat remains the architecture of record.
+
+The knob is log-normalized to [0, 1] over 100Hz–20kHz. The deployed model is run 23 (`model_concat`, 128 GRU units, 256-sample warmup, variable training data). See [devlog/DEVLOG2.md](devlog/DEVLOG2.md) for the full experiment history.
 
 ## Csound opcode
 
@@ -197,9 +225,9 @@ See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working exa
 
 ## Next steps
 
-- FiLM conditioning experiment: replace knob concatenation with post-GRU FiLM, train at 64 units
-- Variable-parameter training data: LFO-modulated cutoff sweeps as training targets
 - Paper: Csound conference writeup
+- ~~Variable-parameter training data~~ -- complete (run 23); +10 dB on fast LFO
+- ~~FiLM conditioning experiment~~ -- complete (runs 21-22); pre-GRU FiLM matched concat statically but did not improve dynamic tracking
 - ~~Csound opcode implementation~~ -- done, see `src/csound_opcode/`
 - ~~Architecture sweet spot -- 64 GRU units with `knob_to_h0`~~ -- trained (run 14), ablation complete
 - ~~Dynamic cutoff eval~~ -- done, see `eval_dynamic.py`

@@ -10,14 +10,16 @@ HELP = """
 Evaluate a trained model against static Moog reference files at a grid of cutoff frequencies.
 
 Usage:
-  eval_param_model.py <model.pt> [warmup] [--save <dir>] [--show] [--force]
+  eval_param_model.py <model.pt> [warmup] [--dry <path>] [--save <dir>] [--show] [--force]
 
 Arguments:
   model.pt    Path to trained model checkpoint (.pt)
   warmup      Warmup samples fed to GRU before scoring (default: 256)
 
 Flags:
-  --save <dir>  Write evalOutput.txt and evalOutput.png to <dir>
+  --dry <path>  Dry audio file (default: audio/bench_mono.wav). Wet dir and pattern
+                are derived from the stem (e.g. audio/ruin_mono.wav -> filteredOutput/ruin/)
+  --save <dir>  Write evalOutput[_stem].txt and evalOutput[_stem].png to <dir>
   --force       Overwrite existing files without prompting
   --show        Open the interactive plot window
   --help, -h    Show this message
@@ -35,6 +37,16 @@ if '--save' in sys.argv:
     _args = [a for i, a in enumerate(sys.argv) if i not in (idx, idx + 1)]
 else:
     _args = list(sys.argv)
+
+DRY_PATH = "audio/bench_mono.wav"
+if '--dry' in _args:
+    idx = _args.index('--dry')
+    if idx + 1 >= len(_args):
+        print("Error: --dry requires a path argument")
+        sys.exit(1)
+    DRY_PATH = _args[idx + 1]
+    _args = [a for i, a in enumerate(_args) if i not in (idx, idx + 1)]
+
 _args = [a for a in _args if a not in ('--show', '--force', '--help', '-h')]
 
 if '--help' in sys.argv or '-h' in sys.argv:
@@ -48,9 +60,11 @@ if len(_args) < 2:
 MODEL_PATH  = _args[1]
 warmup_size = int(_args[2]) if len(_args) > 2 else 256
 
-DRY_PATH         = "audio/bench_mono.wav"
-WET_DIR          = "audio/filteredOutput/bench"
-WET_PATTERN      = "bench_mono_{freq}hz.wav"
+dry_stem    = os.path.splitext(os.path.basename(DRY_PATH))[0]  # e.g. "ruin_mono"
+audio_dir   = os.path.dirname(DRY_PATH)
+wet_subdir  = dry_stem.replace('_mono', '')                    # e.g. "ruin"
+WET_DIR     = os.path.join(audio_dir, "filteredOutput", wet_subdir)
+WET_PATTERN = dry_stem + "_{freq}hz.wav"
 ALL_CUTOFF_FREQS = [20, 60, 100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 20000]
 window_size      = 8192
 
@@ -201,8 +215,9 @@ def main():
 
     if SAVE_DIR and confirm_overwrite(SAVE_DIR):
         os.makedirs(SAVE_DIR, exist_ok=True)
-        txt_path = os.path.join(SAVE_DIR, 'evalOutput.txt')
-        png_path = os.path.join(SAVE_DIR, 'evalOutput.png')
+        suffix   = f'_{dry_stem}' if dry_stem != 'bench_mono' else ''
+        txt_path = os.path.join(SAVE_DIR, f'evalOutput{suffix}.txt')
+        png_path = os.path.join(SAVE_DIR, f'evalOutput{suffix}.png')
         with open(txt_path, 'w') as f:
             f.write('\n'.join(table_lines) + '\n')
         fig.savefig(png_path, dpi=150)

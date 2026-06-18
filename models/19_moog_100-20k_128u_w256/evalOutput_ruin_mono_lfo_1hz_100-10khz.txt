@@ -1,0 +1,2 @@
+Ref: ruin_mono_lfo_1hz_100-10khz.wav
+Overall ESR: -40.1 dB
