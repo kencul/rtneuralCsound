@@ -37,6 +37,16 @@ if '--save' in sys.argv:
     _args = [a for i, a in enumerate(sys.argv) if i not in (idx, idx + 1)]
 else:
     _args = list(sys.argv)
+
+DRY_PATH = "audio/bench_mono.wav"
+if '--dry' in _args:
+    idx = _args.index('--dry')
+    if idx + 1 >= len(_args):
+        print("Error: --dry requires a path argument")
+        sys.exit(1)
+    DRY_PATH = _args[idx + 1]
+    _args = [a for i, a in enumerate(_args) if i not in (idx, idx + 1)]
+
 _args = [a for a in _args if a not in ('--show', '--force', '--help', '-h')]
 
 if '--help' in sys.argv or '-h' in sys.argv:
@@ -51,7 +61,6 @@ MODEL_PATH = _args[1]
 REF_WAV    = _args[2]
 REF_CSV    = _args[3]
 WARMUP     = int(_args[4]) if len(_args) > 4 else 256
-DRY_PATH   = "audio/bench_mono.wav"
 WINDOW     = 8192
 
 
