@@ -1018,6 +1018,28 @@ However, the difference spectrogram shows brighter regions below approximately 3
 E_DC = (mean(target - pred))^2 / mean(target^2)
 ```
 
+---
+
+## Run dist_08 setup: DC loss term
+
+**Hypothesis.** The sub-30 Hz error visible in the dist_07 diff spectrogram reflects a mean-offset drift that MR-STFT cannot penalise. Log-magnitude STFT bins at very low frequencies carry minimal energy, so DC bias accumulates without gradient pressure. Adding the Wilczek et al. (DAFx 2022) DC term alongside the existing L1 + MR-STFT loss should close this gap without disturbing the spectral objective.
+
+**Changes from dist_07.** A `dc_loss` function was added returning `mean(t - p)^2 / (mean(t^2) + eps)`, summed into `combined_loss` with weight 1. All other hyperparameters and architecture unchanged.
+
+**NaN at epoch 9.** Training NaN'd at the start of epoch 9 with the dist_07 stability settings (LR 3e-4, clip 0.5). The pattern -- both train and val NaN simultaneously -- indicates weight corruption during a bad batch at the end of epoch 8, not during validation. Root cause is the same gradient explosion seen in dist_07 Failure 2: the DC term adds a small but correlated gradient on top of what was already near the stability threshold, pushing certain batches over. Fixed by lowering LR to 1e-4 and clip norm to 0.3.
+
+---
+
+## Run dist_08 results
+
+Training completed in 236 epochs (early stop, patience 40). Best val_loss 0.3616 at approximately epoch 196. The DC term settled to 2--5e-4 in the final epochs, confirming it was active but providing minimal gradient signal.
+
+Best val_loss 0.3616 vs dist_07's 0.3592: effectively equivalent at the combined loss level. The bench spectrogram comparison shows dist_08 is marginally worse than dist_07, with slightly more bright spots visible. Sub-30 Hz error was not measurably reduced.
+
+**Analysis.** The DC term did not improve on dist_07. Two factors contributed. First, the term produced near-zero values throughout training, meaning there was no significant DC drift for it to correct. Second, the NaN issue forced a reduction from LR 3e-4 to 1e-4, which converged to a slightly worse local minimum than dist_07 despite reaching a comparable combined loss value. The LR reduction is the most likely cause of the marginal quality decrease.
+
+**Conclusion.** The DC loss term provides no measurable benefit for this model and data combination. dist_07 remains the best model. The sub-30 Hz error in dist_07's diff spectrogram is real but not significant enough to drive a useful gradient signal through this loss formulation.
+
 **Citation note (for paper writeup).** The exact formula is from Wilczek, Wright, Valimaki and Habets, "Virtual Analog Modeling of Distortion Circuits Using Neural Ordinary Differential Equations," DAFx 2022, equation (5). Wilczek et al. credit the combined pre-emphasised ESR + DC loss to earlier work in the Wright/Damskagg/Valimaki lineage (their references [5-8], which trace back to Wright, Damskagg, Valimaki, "Real-time black-box modelling with recurrent neural networks," DAFx 2019). When citing in the paper, attribute the formula to Wilczek 2022 eq. (5) and the broader practice to Wright et al. 2019.
 
 Next run (dist_08): add E_DC as an additive term to the existing combined loss.
