@@ -45,10 +45,12 @@ Research into neural network audio effect modeling using RTNeural, working towar
 │   │   ├── main.cpp                    # moogGen: static training data generator
 │   │   └── sweep_ref.cpp               # sweep_ref: dynamic cutoff reference generator
 │   └── csound_opcode/
-│       └── moognn.cpp                  # Csound plugin opcode (moognn.dll)
+│       ├── moognn.cpp                  # Csound plugin opcode (moognn.dll)
+│       └── distnn.cpp                  # Csound plugin opcode (distnn.dll)
 ├── csound/
 │   ├── test_passthrough.csd            # File playback through opcode with cutoff sweep
-│   └── test_midi_saw.csd               # Live MIDI with CC-controlled cutoff
+│   ├── test_midi_saw.csd               # Live MIDI with CC-controlled cutoff
+│   └── test_distnn.csd                 # File playback through distnn with wet/dry sweep
 ├── vendor/
 │   ├── RTNeural/                       # Git submodule: real-time neural inference
 │   ├── MoogLadders/                    # Moog ladder filter reference implementations
@@ -239,6 +241,20 @@ Opcode signature: `aout moognn ain, Spath, kcutoff`
 Use `moognn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires.
 
 See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples.
+
+## Distortion opcode
+
+Opcode signature: `aout distnn ain, Spath, kmix`
+
+- `ain`: audio input
+- `Spath`: path to the model JSON weights file
+- `kmix`: wet/dry blend, k-rate (0 = dry, 1 = fully wet)
+
+Deployed model: `models/dist_05_gru128/weights.json` (GRU 128 units, trained on `distortionGigaTestAudio`).
+
+Use `distnn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires. See `csound/test_distnn.csd` for a working example.
+
+**Caveats:** held-out ESR is positive (+1.1 dB on bench) — the model captures the spectral character of the distortion but cannot reproduce the exact waveform on unseen audio. Polyphony ceiling is ~6 voices (same GRU size as the deployed Moog model).
 
 ## Distortion modeling
 

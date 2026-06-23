@@ -47,3 +47,12 @@ target_include_directories(moognn PRIVATE
 target_link_libraries(moognn PRIVATE RTNeural)
 target_compile_features(moognn PRIVATE cxx_std_17)
 set_target_properties(moognn PROPERTIES PREFIX "")
+
+add_library(distnn SHARED src/csound_opcode/distnn.cpp)
+target_include_directories(distnn PRIVATE
+    ${CSOUND_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/vendor/RTNeural
+)
+target_link_libraries(distnn PRIVATE RTNeural)
+target_compile_features(distnn PRIVATE cxx_std_17)
+set_target_properties(distnn PROPERTIES PREFIX "")

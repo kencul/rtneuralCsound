@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import numpy as np
 import librosa
 import json
@@ -33,15 +34,15 @@ sys.stdout = _Tee(sys.__stdout__, _log)
 sys.stderr = _Tee(sys.__stderr__, _log)
 
 GRU_HIDDEN  = 128
-CELL        = 'lstm'
+CELL        = 'gru'
 window_size = 8192
 warmup_size = 256
 VAL_FRAC    = 0.2
 SEED        = 42
 
 PAIRS = [
-    ("audio/distortionGigaTestAudio.wav",       "audio/distortionOutput/distortionGigaTestOutput_aligned.wav"),
-    ("audio/distortionGigaTestAudio-10dB.wav",  "audio/distortionOutput/distortionGigaTestOutput-10dB_aligned.wav"),
+    ("audio/distortionGigaTestAudio.wav",       "audio/distortionOutput/distortionGigaTestOutput.wav"),
+    ("audio/distortionGigaTestAudio-10dB.wav",  "audio/distortionOutput/distortionGigaTestOutput-10dB.wav"),
 ]
 
 
@@ -106,20 +107,38 @@ Y_val   = torch.tensor(Y_val,   dtype=torch.float32).to(device)
 train_loader = DataLoader(TensorDataset(X_train, Y_train), batch_size=64, shuffle=True)
 
 model     = Model(gru_hidden=GRU_HIDDEN, cell=CELL).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20, factor=0.5, min_lr=1e-6)
 
+_MRSTFT_PARAMS = [
+    (2048, 512,  2048),
+    (1024, 256,  1024),
+    ( 512, 128,   512),
+]
 
-def pre_emphasis(x, coef=0.95):
-    return torch.cat([x[:, :1, :], x[:, 1:, :] - coef * x[:, :-1, :]], dim=1)
+
+def _stft_log_mag(x, fft_size, hop_size, win_length):
+    w = torch.hann_window(win_length, device=x.device)
+    X = torch.stft(x, fft_size, hop_size, win_length, w, return_complex=True)
+    mag = torch.sqrt(torch.clamp(X.real**2 + X.imag**2, min=1e-8))
+    return torch.log(mag)
 
 
-def esr_loss(pred, target):
-    pred   = pre_emphasis(pred)
-    target = pre_emphasis(target)
-    error  = torch.mean((pred - target) ** 2, dim=(1, 2))
-    energy = torch.clamp(torch.mean(target ** 2, dim=(1, 2)), min=1e-4)
-    return torch.mean(error / energy)
+# L1 + log-magnitude MR-STFT per Comunita et al. (ICASSP 2023).
+# Spectral convergence omitted: its denominator norm can blow up on near-silent
+# windows, causing NaN gradients that corrupt weights irreversibly.
+def combined_loss(pred, target):
+    p = pred.squeeze(2)
+    t = target.squeeze(2)
+    l_mae = nn.functional.l1_loss(p, t)
+    l_mrstft = 0.0
+    for fft_size, hop_size, win_length in _MRSTFT_PARAMS:
+        l_mrstft += nn.functional.l1_loss(
+            _stft_log_mag(p, fft_size, hop_size, win_length),
+            _stft_log_mag(t, fft_size, hop_size, win_length),
+        )
+    l_mrstft = l_mrstft / len(_MRSTFT_PARAMS)
+    return l_mae + l_mrstft, l_mae, l_mrstft
 
 
 best_val_loss = float('inf')
@@ -133,24 +152,35 @@ train_start = time.time()
 for epoch in range(epochs):
     epoch_start = time.time()
     model.train()
-    train_loss = 0.0
+    train_loss = train_mae = train_mrstft = 0.0
     for xb, yb in train_loader:
         optimizer.zero_grad()
         pred, _ = model(xb)
-        loss = esr_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
+        loss, l_mae, l_mrstft = combined_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
         optimizer.step()
-        train_loss += loss.item() * len(xb)
-    train_loss /= len(X_train)
+        n = len(xb)
+        train_loss   += loss.item()    * n
+        train_mae    += l_mae.item()   * n
+        train_mrstft += l_mrstft.item() * n
+    train_loss   /= len(X_train)
+    train_mae    /= len(X_train)
+    train_mrstft /= len(X_train)
 
     model.eval()
     with torch.no_grad():
-        val_loss = 0.0
+        val_loss = val_mae = val_mrstft = 0.0
         for xb, yb in DataLoader(TensorDataset(X_val, Y_val), batch_size=64):
             pred, _ = model(xb)
-            val_loss += esr_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :]).item() * len(xb)
-        val_loss /= len(X_val)
+            loss, l_mae, l_mrstft = combined_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
+            n = len(xb)
+            val_loss   += loss.item()    * n
+            val_mae    += l_mae.item()   * n
+            val_mrstft += l_mrstft.item() * n
+        val_loss   /= len(X_val)
+        val_mae    /= len(X_val)
+        val_mrstft /= len(X_val)
 
     scheduler.step(val_loss)
 
@@ -169,7 +199,9 @@ for epoch in range(epochs):
 
     lr = optimizer.param_groups[0]['lr']
     epoch_time = time.time() - epoch_start
-    print(f"Epoch {epoch+1}/{epochs} - loss: {train_loss:.4f} - val_loss: {val_loss:.4f} - lr: {lr:.2e} - {epoch_time:.1f}s")
+    print(f"Epoch {epoch+1}/{epochs} - loss: {train_loss:.4f} (mae {train_mae:.4f} mrstft {train_mrstft:.4f})"
+          f" - val: {val_loss:.4f} (mae {val_mae:.4f} mrstft {val_mrstft:.4f})"
+          f" - lr: {lr:.2e} - {epoch_time:.1f}s")
 
     if epochs_without_improvement >= early_stop_patience:
         print(f"Early stopping: val_loss has not improved for {early_stop_patience} epochs.")
