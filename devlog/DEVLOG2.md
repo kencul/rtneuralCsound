@@ -1043,3 +1043,30 @@ Best val_loss 0.3616 vs dist_07's 0.3592: effectively equivalent at the combined
 **Citation note (for paper writeup).** The exact formula is from Wilczek, Wright, Valimaki and Habets, "Virtual Analog Modeling of Distortion Circuits Using Neural Ordinary Differential Equations," DAFx 2022, equation (5). Wilczek et al. credit the combined pre-emphasised ESR + DC loss to earlier work in the Wright/Damskagg/Valimaki lineage (their references [5-8], which trace back to Wright, Damskagg, Valimaki, "Real-time black-box modelling with recurrent neural networks," DAFx 2019). When citing in the paper, attribute the formula to Wilczek 2022 eq. (5) and the broader practice to Wright et al. 2019.
 
 Next run (dist_08): add E_DC as an additive term to the existing combined loss.
+
+---
+
+## ASR implementation and three-way model comparison
+
+**Motivation.** The held-out bench gap in dist_07 (positive ESR with qualitatively good spectrogram) could be caused by either training-distribution mismatch or aliasing, and the existing metrics cannot distinguish them. A diode clipper generates harmonics above Nyquist; if the model's internal nonlinearity produces aliased components, the output spectrum is similar in character to the target but phase-incoherent with it, which matches the observed symptom exactly. Sato and Smith ("Aliasing Reduction in Neural Amp Modeling by Smoothing Activations," DAFx 2025) introduce the Aliasing-to-Signal Ratio (ASR) as a metric that quantifies aliasing independently of modeling accuracy. Adding it to the eval pipeline gives a way to confirm or rule out aliasing as a contributing factor before committing to an architectural fix.
+
+**Implementation.** `python/eval_asr.py` feeds clean sine inputs at 500, 1000, 2000, 4000, and 8000 Hz through the model at amplitude 0.5 for 4 seconds at 48 kHz. The first 0.5 s of output is discarded to cover GRU warmup and any settling transient. The remaining signal is passed to Welch's method (FFT size 32768, 50% Hann overlap), giving 1.46 Hz frequency resolution. FFT bins within +/-3 bins of an integer harmonic of f0 are tagged as signal; everything above 30 Hz that is not a signal bin is tagged as alias; bins below 30 Hz are excluded to skip DC and sub-bass noise. ASR is reported as 10 log10(E_alias / E_harm), with more negative values indicating less aliasing. Output is written to `<eval_dir>/asr_log.txt`, `asr_summary.txt`, and `asr_spectra.png`.
+
+**Results.**
+
+| Test freq | dist_05 (ESR) | dist_07 (MR-STFT) | dist_08 (MR-STFT+DC) |
+|-----------|---------------|--------------------|----------------------|
+| 500 Hz    | -43.0         | -43.1              | -43.5                |
+| 1000 Hz   | -43.4         | -43.5              | -43.6                |
+| 2000 Hz   | -43.0         | -43.5              | -43.6                |
+| 4000 Hz   | -42.6         | -43.4              | -43.5                |
+| 8000 Hz   | -21.1         | **-39.6**          | -21.0                |
+| mean      | -38.6         | -42.7              | -39.0                |
+
+All three models are clean at 500 to 4000 Hz (around -43 dB across the board). The discriminating frequency is 8000 Hz, where dist_07 produces 18 dB less aliasing than either dist_05 or dist_08. The 8000 Hz case is the most informative because at this f0 only two harmonics (8 kHz and 16 kHz) fit below the 24 kHz Nyquist limit, so every higher harmonic the nonlinearity generates folds back into the audible band as aliasing.
+
+**Interpretation.** MR-STFT loss is implicitly reducing aliasing at high frequencies. This is consistent with the loss structure: it penalises spectral energy in places it should not be, and aliased components are exactly that. The dist_07 vs dist_05 comparison isolates the cause: same data, same architecture, only the loss changed, and ASR at 8 kHz improved by 18 dB.
+
+The dist_08 regression is more surprising. dist_08 was trained with the same loss as dist_07 plus a DC term, but its aliasing profile reverted to dist_05's level. The most likely cause is the LR reduction from 3e-4 to 1e-4 that was forced by NaN instability when the DC term was added. The slower optimisation appears to have settled into a different local minimum that achieves equivalent combined val loss without dist_07's aliasing suppression. This is the third negative result for the DC term experiment, following the marginal spectrogram regression and the lack of measurable DC drift during training.
+
+**Conclusion.** dist_07 remains the best model and is now the canonical baseline. Anti-aliasing fine-tuning (Carson, Wright, Bilbao, "Anti-aliasing of neural distortion effects via model fine tuning," DAFx 2025) drops to lower priority: MR-STFT is already providing most of what teacher-student fine-tuning would deliver. The remaining held-out bench gap (+1.1 dB ESR) is now confirmed not to be an aliasing issue, which leaves exposure bias as the next-most-likely contributor (Peussa, Damskagg, Sherson, Mimilakis, Juvela, Gotsopoulos, Valimaki, "Exposure Bias and State Matching in Recurrent Neural Network Virtual Analog Models," DAFx 2021). The model has only been trained on 8192-sample windows (about 170 ms), but bench is several minutes long, so state errors compound over sequences the network has never seen during training. The next experiment is to retrain dist_07's configuration with substantially longer windows (32k or 65536 samples) and re-evaluate held-out bench.
