@@ -1018,4 +1018,6 @@ However, the difference spectrogram shows brighter regions below approximately 3
 E_DC = (mean(target - pred))^2 / mean(target^2)
 ```
 
+**Citation note (for paper writeup).** The exact formula is from Wilczek, Wright, Valimaki and Habets, "Virtual Analog Modeling of Distortion Circuits Using Neural Ordinary Differential Equations," DAFx 2022, equation (5). Wilczek et al. credit the combined pre-emphasised ESR + DC loss to earlier work in the Wright/Damskagg/Valimaki lineage (their references [5-8], which trace back to Wright, Damskagg, Valimaki, "Real-time black-box modelling with recurrent neural networks," DAFx 2019). When citing in the paper, attribute the formula to Wilczek 2022 eq. (5) and the broader practice to Wright et al. 2019.
+
 Next run (dist_08): add E_DC as an additive term to the existing combined loss.
