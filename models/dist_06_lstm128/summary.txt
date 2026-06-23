@@ -1,0 +1,9 @@
+model: models/dist_06_lstm128/best_model.pt
+cell:  LSTM 128u
+
+Pair           Split        ESR (dB)
+------------------------------------
+bench          held-out          1.1
+bench-10dB     held-out          1.4
+giga           train           -19.5
+giga-10dB      train           -13.9

@@ -6,22 +6,39 @@ Research into neural network audio effect modeling using RTNeural, working towar
 
 ```
 ├── audio/
-│   ├── bench_mono.wav                  # Validation audio
-│   ├── testSound_mono.wav              # Training audio
-│   ├── ruin_mono.wav                   # Held-out eval audio (never used in training/validation)
-│   └── filteredOutput/
-│       ├── bench/                      # Moog-filtered outputs for validation
-│       ├── testSound/                  # Moog-filtered outputs for training
-│       └── ruin/                       # Moog-filtered outputs for held-out eval
+│   ├── bench_mono.wav                  # Moog: validation audio
+│   ├── testSound_mono.wav              # Moog: training audio
+│   ├── ruin_mono.wav                   # Moog: held-out eval audio
+│   ├── distortionTestSound_mono.wav    # Distortion: training audio (dry)
+│   ├── distortionGigaTestAudio.wav     # Distortion: large training audio (dry)
+│   ├── distortionGigaTestAudio-10dB.wav
+│   ├── filteredOutput/
+│   │   ├── bench/                      # Moog-filtered outputs for validation
+│   │   ├── testSound/                  # Moog-filtered outputs for training
+│   │   └── ruin/                       # Moog-filtered outputs for held-out eval
+│   ├── distortionBench.wav             # Distortion: bench audio (dry)
+│   ├── distortionBench-10dB.wav
+│   └── distortionOutput/
+│       ├── benchOutput.wav             # Distortion: hardware-processed bench (validation)
+│       ├── distortionTestSoundOutput.wav
+│       ├── ruinOutput.wav
+│       ├── distortionGigaTestOutput.wav     # Latency-corrected, 48kHz
+│       ├── distortionGigaTestOutput-10dB.wav
+│       ├── distortionBenchOutput.wav        # Latency-corrected, 48kHz
+│       └── distortionBenchOutput-10dB.wav
 ├── models/                             # Trained model checkpoints by run number
 ├── python/
-│   ├── model_concat.py                 # Knob-concatenation model architecture
+│   ├── model_concat.py                 # Knob-concatenation model architecture (Moog)
 │   ├── model_film.py                   # FiLM conditioning model architecture (pre- and post-GRU)
+│   ├── model_distortion.py             # Non-parametric distortion model architecture
 │   ├── tensor_torch_param.py           # Training script (concat architecture, static data)
 │   ├── tensor_torch_film.py            # Training script (FiLM architecture)
 │   ├── tensor_torch_variable.py        # Training script (concat architecture, static + LFO data)
+│   ├── tensor_torch_distortion.py      # Training script (distortion model)
 │   ├── eval_param_model.py             # Static cutoff evaluation
 │   ├── eval_dynamic.py                 # Dynamic cutoff evaluation (sweep/LFO)
+│   ├── eval_distortion.py              # Distortion model evaluation
+│   ├── align_audio.py                  # Dry/wet latency alignment tool
 │   └── compareSpectrum.py              # Spectrogram comparison tool
 ├── src/
 │   ├── moogGen/
@@ -223,8 +240,44 @@ Use `moognn_preload Spath` at score time 0 to pre-cache the JSON before the firs
 
 See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples.
 
+## Distortion modeling
+
+Second modeling target: a hardware breadboard diode distortion effect. Unlike the Moog filter, distortion is nonlinear and content-dependent. The architecture is the same Conv1d+GRU+Dense+skip structure but without the knob input channel (`model_distortion.py`).
+
+### Preparing training data
+
+Hardware recordings must be latency-corrected before training. When audio is played through the pedal and recorded back in, the ADC/DAC round-trip of the interface introduces a fixed sample offset between the dry and wet files. Use `align_audio.py` to measure and correct this:
+
+```bash
+# Measure the lag (no --save: report only)
+python python/align_audio.py <dry> <wet>
+
+# Write corrected wet file (overwrites target path)
+python python/align_audio.py <dry> <wet> --save <output_wet_path>
+
+# Resample both to 48kHz before aligning (for recordings captured at a different rate)
+python python/align_audio.py <dry> <wet> --sr 48000 --save <output_wet_path>
+```
+
+The script uses cross-correlation on the first 5 seconds to find the lag. If wet is delayed (positive lag), it trims the start of wet. If wet is early (negative lag), it prepends silence. Dry is never modified. The offset is fixed for a given interface configuration, so measure once per session and apply to all pairs from that session.
+
+### Training
+
+```bash
+python python/tensor_torch_distortion.py models/dist_my_run
+```
+
+Dry/wet paths are set near the top of the script. Training on diverse audio sources is important: a diode clipper's output depends on the instantaneous waveform, so a model trained on one audio source does not generalize to audio with different frequency content or dynamics. See DEVLOG2.md for the full experiment history.
+
+### Evaluation
+
+```bash
+python python/eval_distortion.py <model.pt> [warmup] [--dry <path>] [--wet <path>] [--save <dir>] [--show]
+```
+
 ## Next steps
 
+- Host training audio externally (Google Drive / Dropbox) — distortion source files (`distortionGigaTestAudio`, `distortionBench`, `distortionOutput/`) are excluded from the repo via `.gitignore` due to size
 - Paper: Csound conference writeup
 - ~~Variable-parameter training data~~ -- complete (run 23); +10 dB on fast LFO
 - ~~FiLM conditioning experiment~~ -- complete (runs 21-22); pre-GRU FiLM matched concat statically but did not improve dynamic tracking

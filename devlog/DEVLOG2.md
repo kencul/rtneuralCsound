@@ -711,7 +711,174 @@ Run 23 showed variable training data fixes fast-LFO degradation, but the trainin
 
 ---
 
-## Next steps
+## Next steps (Moog filter)
 
 - **Extend LFO range to 20kHz** and retrain LFO-only model to eliminate the frequency ceiling. Worth combining with a static/LFO mix to anchor high-frequency behavior.
 - **Paper**: write up for the Csound conference -- architecture decisions, ablation results, warmup analysis, opcode implementation, dynamic eval, FiLM experiment results, and variable training data findings.
+
+---
+
+## Distortion effect
+
+### Overview
+
+Second modeling target: a hardware breadboard distortion effect. Unlike the Moog filter (linear, content-independent), distortion is a nonlinear circuit whose output depends on the instantaneous waveform, not just the parameter setting. No controllable parameter at first. This is a fixed-setting, non-parametric effect.
+
+**Architecture:** same Conv1d+GRU+Dense+skip structure as the Moog concat models but with the knob input channel removed. GRU input is 16 (conv features only, no 17th knob channel). Implemented in `python/model_distortion.py`. Training script: `python/tensor_torch_distortion.py`. Eval script: `python/eval_distortion.py`.
+
+**Training data:** three audio files processed through the hardware pedal at the same gain setting:
+
+| File | Role | Duration | Windows |
+|------|------|----------|---------|
+| `distortionTestSound_mono.wav` | Training | 128s | 749 |
+| `bench_mono.wav` | Validation | 40s | 234 |
+| `ruin_mono.wav` | Eval / Training | 60s | 350 |
+
+Wet files are 24-bit stereo recorded from the pedal output; `librosa.load(mono=True)` averages channels on load. `distortionTestSound_mono.wav` was specifically recorded with intentionally varying amplitude levels to expose the input-level-dependent saturation behavior of the circuit.
+
+---
+
+### Run dist_01 (distortionTestSound only, bench val)
+
+**Config:** 128 GRU units, 256 warmup, training on distortionTestSound alone, validation on bench.
+
+**Result:** catastrophic failure. Val loss started at 5.09 (epoch 1) and climbed monotonically to 11.20 by epoch 47 while train loss was still decreasing (1.24 → 0.12). Early stopped at epoch 47. Best val_loss: 4.59.
+
+For reference, the passthrough ESR (model outputs dry) was 3.22 for training and 7.14 for validation. The best val_loss of 4.59 is only marginally better than passthrough -- the model essentially failed to generalize.
+
+**Analysis:** training loss reaching 0.12 (not converging to near-zero like the Moog runs) combined with val loss actively degrading as training progresses is textbook overfitting caused by training and validation data being too different in content.
+
+For the Moog filter, training on `testSound_mono` and validating on `bench_mono` worked because a linear filter's response is content-independent. The same cutoff applied to any audio produces the same frequency response. A distortion circuit does not have this property. The output at each sample depends on the instantaneous waveform shape, not just the amplitude level. A model trained only on `distortionTestSound` learns what the circuit does to that specific audio's patterns; when it sees `bench_mono` (completely different harmonic structure, dynamics, and timbral content), it has no basis for generalization.
+
+This was confirmed by cross-referencing Wilczek et al. (DAFx 2022): their diode clipper models used ~8 minutes of **mixed guitar and bass** recordings for training and validated on a bass-only subset. Using two distinct instrument types in training is what allows the model to learn the general transfer function rather than source-specific mappings. Their key structural difference from run dist_01: training data diversity across content types, not just amplitude levels.
+
+---
+
+### Run dist_02 (distortionTestSound + ruin, bench val, 128u GRU)
+
+**Change from dist_01:** added `ruin_mono.wav` to training alongside `distortionTestSound_mono.wav`, giving two audio sources and 1100 total windows. Validation kept on bench.
+
+**Result:** worse than dist_01. Best val_loss: 5.28 (dist_01 was 4.59). The val loss still climbed from the first epoch.
+
+Adding ruin did not help because ruin and distortionTestSound are not diverse enough relative to bench. The two training sources teach the model similar things, so it still has no exposure to whatever makes bench different.
+
+---
+
+### Run dist_03 (distortionTestSound + ruin, bench val, 256u GRU)
+
+**Change from dist_02:** GRU hidden size doubled to 256 units.
+
+**Result:** best val_loss 4.92, achieved at epoch 1. Every subsequent epoch made bench performance worse. The model was at its closest to bench before it had learned anything at all, meaning training actively moved it away from the bench distribution.
+
+---
+
+### Run dist_04 (distortionTestSound + ruin, bench val, 256u LSTM)
+
+**Change from dist_03:** swapped GRU for LSTM at the same 256 unit count.
+
+**Result:** best val_loss 5.05, also at epoch 1. Same pattern as dist_03.
+
+---
+
+### Analysis across dist_01 to dist_04
+
+Best val_loss across all four runs:
+
+| Run | Architecture | Training sources | Best val_loss | Epoch |
+|-----|-------------|-----------------|---------------|-------|
+| dist_01 | GRU 128u | distortionTestSound | 4.59 | 7 |
+| dist_02 | GRU 128u | distortionTestSound + ruin | 5.28 | 1 |
+| dist_03 | GRU 256u | distortionTestSound + ruin | 4.92 | 1 |
+| dist_04 | LSTM 256u | distortionTestSound + ruin | 5.05 | 1 |
+
+All four cluster around 4.6 to 5.3 with no meaningful improvement across architecture changes or training data additions. The ceiling is not the model. It is the data.
+
+The root cause: bench_mono is too different in content from distortionTestSound and ruin for any black-box model to bridge the gap. For the Moog filter, training on testSound and validating on bench worked because a linear filter's response is content-independent. A distortion circuit is nonlinear -- the output at each sample depends on the instantaneous waveform shape. A model trained on two audio sources learns what the circuit does to those specific waveform patterns. bench_mono has different frequency distribution, dynamics, and harmonic content, so the learned mapping does not transfer.
+
+Runs dist_03 and dist_04 confirmed this is not a capacity problem. Both hit their best val_loss at epoch 1, before any meaningful training had occurred. Larger models overfit faster and diverge more severely.
+
+The Wilczek et al. (DAFx 2022) paper used approximately 8 minutes of mixed guitar and bass for training -- two genuinely distinct instrument types. This is what gives the model enough diversity to generalize. All four distortion runs combined only about 3 minutes of two sources that are apparently not diverse enough relative to bench.
+
+---
+
+## New training data
+
+The core problem across all four runs was insufficient diversity in training audio. To address this, a new 17-minute training file was assembled from a wide range of sources: original Moog filter training audio, personal music project stems, and miscellaneous recordings from disk. The goal was to cover a much broader range of frequency content, dynamics, and timbral variety than distortionTestSound and ruin alone could provide. This file will be processed through the distortion pedal and used as the primary training source for the next run.
+
+---
+
+## Dry/wet alignment
+
+When audio is played through a hardware pedal and recorded back in, the ADC/DAC round-trip of the audio interface introduces a fixed sample offset between the dry and wet files. If this offset is not corrected, the model trains against pairs that are slightly out of sync, which adds noise to every gradient step. For a nonlinear circuit like a diode clipper, where the output depends on the instantaneous waveform, even a few samples of misalignment can meaningfully degrade training.
+
+The offset is measured using cross-correlation. `scipy.signal.correlate(wet, dry)` is computed on the first few seconds of each file (enough to be fast on long recordings). The peak of the correlation gives the lag in samples: positive means the wet is delayed relative to dry, negative means the wet is early. For an analog pedal the latency through the circuit itself is negligible; the offset comes entirely from interface buffering.
+
+**Tool:** `python/align_audio.py`
+
+```
+python python/align_audio.py <dry> <wet> [--sr <rate>] [--save <output_wet_path>] [--force]
+```
+
+Run without `--save` first to inspect the measured lag. Then re-run with `--save <path>` to write the corrected wet file to that path. Dry is never written. Use `--sr` to resample both files to a target rate before aligning; this is needed when the recordings are at a different rate than the training pipeline expects.
+
+When the lag is positive (wet is delayed), the script trims the leading samples from the wet file. When the lag is negative (wet is early), it prepends that many zero samples to the start of wet. In both cases dry is unchanged.
+
+**GigaTestAudio recordings:** wet was 32 samples early at 48 kHz (-0.67 ms). Both GigaTest pairs corrected and saved at 48 kHz. The original wet files were recorded at 96 kHz; the script resampled them on load.
+
+**Bench recordings:** wet was 7 samples early at 48 kHz (0.15 ms). Both bench pairs corrected and saved at 48 kHz via `--sr 48000` (originals were 96 kHz). The consistent direction across both sessions (wet early) matches the interface pre-buffering the capture path.
+
+All corrected files are saved with their original filenames, overwriting the uncorrected versions. No `_aligned` suffix is used.
+
+---
+
+## Runs dist_05 and dist_06 (GigaTestAudio training, 80/20 split)
+
+Both runs used the two GigaTestAudio pairs as the only training data. Each pair was split 80/20 by random window shuffle (fixed seed 42), giving 9,600 train and 2,398 val windows combined. Validation is therefore an in-distribution split of the same audio, not a separate source.
+
+`model_distortion.py` was updated to support both GRU and LSTM via a `cell` parameter (`self.rnn`). The training script (`tensor_torch_distortion.py`) sets `CELL` at the top to switch between them. Checkpoints embed the arch tag so eval auto-detects the cell type.
+
+| Run | Cell | Units | Best val_loss | Epochs | Notes |
+|-----|------|-------|--------------|--------|-------|
+| dist_05 | GRU | 128 | 0.0243 | 190 (early stop) | LR stepped once |
+| dist_06 | LSTM | 128 | 0.0270 | 300 (no early stop) | Still improving slowly at end |
+
+GRU converged faster and to a better optimum. LSTM would likely need more than 300 epochs to match at the same hidden size, consistent with the Moog filter findings.
+
+---
+
+## Eval script: eval_distortion.py
+
+Replaced the single-pair eval with a multi-pair script that runs a fixed set of pairs and prints an ESR table. Default pairs: bench and bench-10dB (held-out), giga and giga-10dB (training). With `--save <dir>`, writes output WAVs and per-pair spectrogram PNGs. With `--show`, opens interactive plots.
+
+```
+python python/eval_distortion.py <model.pt> [--save <dir>] [--show] [--force]
+```
+
+---
+
+## Conv context bug in chunk inference
+
+Processing long audio in chunks revealed a clicking artifact. The CausalConv1d has kernel size 31, so it needs the previous 30 samples of context. During training each window is processed as a single block, so zero-padding only affects the warmup region. During eval, every new 8192-sample chunk started with 30 zeros instead of the actual preceding signal, producing a brief artifact every 170ms.
+
+The fix: carry the last 30 samples of each chunk into the next as a context buffer. Before each forward pass, prepend the buffer to the chunk; after the pass, discard the first 30 output samples (which correspond to the context prefix). The GRU hidden state was already being carried correctly.
+
+Note: passing the padded input (context + chunk) through the full model means the GRU also processes the 30 repeated samples, advancing `h` by 30 extra steps per chunk. At 30/8192 this is negligible in practice but is a known approximation.
+
+---
+
+## Eval results and ESR vs spectrogram
+
+| Pair | Split | GRU ESR | LSTM ESR |
+|------|-------|---------|----------|
+| bench | held-out | 1.1 dB | 1.1 dB |
+| bench-10dB | held-out | 1.4 dB | 1.4 dB |
+| giga | train | -18.6 dB | -19.5 dB |
+| giga-10dB | train | -16.6 dB | -13.9 dB |
+
+Held-out bench ESR is positive (worse than silence) for both models. Both architectures score identically on bench, ruling out any architectural explanation. The failure is distributional: the model learned the pedal's waveform-level behavior on GigaTestAudio but that mapping does not transfer sample-for-sample to bench content.
+
+The bench spectrogram difference, however, looked comparable to or better than giga. This is the key distinction between the two metrics. ESR measures waveform-level error and is sensitive to sample-level phase and timing differences. A spectrogram shows energy distribution and is phase-insensitive. A model that reproduces the general character of the distortion (which harmonics appear, overall saturation) will look good spectrally even if it cannot replicate the exact waveform on unseen audio. For training data the model has memorised the exact mapping, so both metrics agree. For held-out data only the spectral character transfers.
+
+The bench spectrogram looking good is therefore the meaningful signal: the model learned something about how the circuit behaves in general, not just overfit to specific waveforms. ESR is not the right metric for evaluating that kind of generalisation on a nonlinear effect.
+
+

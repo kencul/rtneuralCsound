@@ -1,0 +1,52 @@
+Loading training data...
+  distortionTestSound: 749 windows
+  ruin:                351 windows
+Loading validation data...
+Train windows: 1100, Val windows: 234, Sample rate: 48000
+Using device: cuda
+Epoch 1/300 - loss: 1.0634 - val_loss: 5.0499 - lr: 1.00e-03 - 9.3s
+Epoch 2/300 - loss: 0.9905 - val_loss: 5.6326 - lr: 1.00e-03 - 7.3s
+Epoch 3/300 - loss: 0.5269 - val_loss: 7.0445 - lr: 1.00e-03 - 7.3s
+Epoch 4/300 - loss: 0.3566 - val_loss: 6.3490 - lr: 1.00e-03 - 7.2s
+Epoch 5/300 - loss: 0.2898 - val_loss: 6.0725 - lr: 1.00e-03 - 7.3s
+Epoch 6/300 - loss: 0.2574 - val_loss: 6.6592 - lr: 1.00e-03 - 7.3s
+Epoch 7/300 - loss: 0.2534 - val_loss: 5.7698 - lr: 1.00e-03 - 7.4s
+Epoch 8/300 - loss: 0.2484 - val_loss: 6.1436 - lr: 1.00e-03 - 7.3s
+Epoch 9/300 - loss: 0.2433 - val_loss: 6.2005 - lr: 1.00e-03 - 8.3s
+Epoch 10/300 - loss: 0.2404 - val_loss: 6.3734 - lr: 1.00e-03 - 10.7s
+Epoch 11/300 - loss: 0.2367 - val_loss: 6.8344 - lr: 1.00e-03 - 10.7s
+Epoch 12/300 - loss: 0.2326 - val_loss: 7.5115 - lr: 1.00e-03 - 10.0s
+Epoch 13/300 - loss: 0.2258 - val_loss: 7.4631 - lr: 1.00e-03 - 10.5s
+Epoch 14/300 - loss: 0.2226 - val_loss: 7.7202 - lr: 1.00e-03 - 9.9s
+Epoch 15/300 - loss: 0.2164 - val_loss: 6.8155 - lr: 1.00e-03 - 10.0s
+Epoch 16/300 - loss: 0.2138 - val_loss: 6.9299 - lr: 1.00e-03 - 10.9s
+Epoch 17/300 - loss: 0.2090 - val_loss: 8.1392 - lr: 1.00e-03 - 10.2s
+Epoch 18/300 - loss: 0.1971 - val_loss: 8.9541 - lr: 1.00e-03 - 9.7s
+Epoch 19/300 - loss: 0.1864 - val_loss: 10.5597 - lr: 1.00e-03 - 10.4s
+Epoch 20/300 - loss: 0.1827 - val_loss: 10.2785 - lr: 1.00e-03 - 9.6s
+Epoch 21/300 - loss: 0.1774 - val_loss: 9.4801 - lr: 1.00e-03 - 11.8s
+Epoch 22/300 - loss: 0.1746 - val_loss: 11.1723 - lr: 5.00e-04 - 10.3s
+Epoch 23/300 - loss: 0.1641 - val_loss: 11.1397 - lr: 5.00e-04 - 10.0s
+Epoch 24/300 - loss: 0.1571 - val_loss: 9.4159 - lr: 5.00e-04 - 12.0s
+Epoch 25/300 - loss: 0.1555 - val_loss: 10.4311 - lr: 5.00e-04 - 10.6s
+Epoch 26/300 - loss: 0.1488 - val_loss: 9.9409 - lr: 5.00e-04 - 11.1s
+Epoch 27/300 - loss: 0.1471 - val_loss: 10.5148 - lr: 5.00e-04 - 9.3s
+Epoch 28/300 - loss: 0.1453 - val_loss: 11.4243 - lr: 5.00e-04 - 11.8s
+Epoch 29/300 - loss: 0.1364 - val_loss: 11.7856 - lr: 5.00e-04 - 10.4s
+Epoch 30/300 - loss: 0.1294 - val_loss: 13.1047 - lr: 5.00e-04 - 10.6s
+Epoch 31/300 - loss: 0.1249 - val_loss: 13.1536 - lr: 5.00e-04 - 11.0s
+Epoch 32/300 - loss: 0.1198 - val_loss: 15.5086 - lr: 5.00e-04 - 10.4s
+Epoch 33/300 - loss: 0.1133 - val_loss: 14.6910 - lr: 5.00e-04 - 11.2s
+Epoch 34/300 - loss: 0.1053 - val_loss: 15.2134 - lr: 5.00e-04 - 11.5s
+Epoch 35/300 - loss: 0.0983 - val_loss: 14.0054 - lr: 5.00e-04 - 9.8s
+Epoch 36/300 - loss: 0.0906 - val_loss: 15.9869 - lr: 5.00e-04 - 12.1s
+Epoch 37/300 - loss: 0.0886 - val_loss: 15.0893 - lr: 5.00e-04 - 9.9s
+Epoch 38/300 - loss: 0.0798 - val_loss: 14.6834 - lr: 5.00e-04 - 10.9s
+Epoch 39/300 - loss: 0.0732 - val_loss: 15.5169 - lr: 5.00e-04 - 10.6s
+Epoch 40/300 - loss: 0.0680 - val_loss: 15.5279 - lr: 5.00e-04 - 11.6s
+Epoch 41/300 - loss: 0.0663 - val_loss: 17.2468 - lr: 5.00e-04 - 10.3s
+Early stopping: val_loss has not improved for 40 epochs.
+Training complete in 6.8m (408s)
+Best val_loss: 5.0499
+Weights exported to models/dist_04_lstm_256u_w256\weights.json
+Loss history saved to models/dist_04_lstm_256u_w256\loss_history.csv
