@@ -13,7 +13,7 @@ nchnls = 1
 instr 1
   ain   diskin "audio/distortionBench.wav", 1
   kmix  = linseg:k(0, 15, 1)   ; ramp dry to wet, then hold wet
-  aout  distnn ain, "models/dist_05_gru128/weights.json", kmix
+  aout  distnn ain, "models/dist_07_gru128_mrstft/weights.json", kmix
         out aout
 endin
 </CsInstruments>

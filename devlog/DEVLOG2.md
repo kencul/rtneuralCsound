@@ -1112,3 +1112,25 @@ Best val_loss is essentially identical across all three runs (dist_07: 0.3592, d
 **Analysis.** Three hypotheses were on the table for the held-out bench gap after the literature review: aliasing, exposure bias, and training-data diversity. ASR ruled out aliasing. dist_09 now rules out exposure bias. Training-data diversity is the only remaining hypothesis and is not testable with another training run on the existing data. Wilczek et al. (DAFx 2022) used 8 minutes of mixed guitar and bass for their diode clipper models; GigaTestAudio is 17 minutes but the timbral diversity within it may still be the limit on what the model can generalise to.
 
 **Conclusion.** dist_07 remains the canonical distortion model. All training-loop experiments have been exhausted as candidates for closing the bench gap. Three branches remain: ship dist_07 as the final opcode weights and move toward the Csound paper writeup, record more diverse pedal data and retrain, or pivot to architecture (GCN-3 per Comunita, Steinmetz, Phan, Reiss "Modelling Black-Box Audio Effects with Time-Varying Feature Modulation," ICASSP 2023) for polyphony gains independent of bench accuracy.
+
+---
+
+## Opcode deployment: dist_07
+
+Updated `distnn` to load `models/dist_07_gru128_mrstft/weights.json` in place of dist_05. Files modified:
+
+- `csound/test_distnn.csd` (file-playback example)
+- `csound/test_midi_distnn.csd` (preload call and per-note distnn calls)
+- `README.md` Distortion opcode section (model path, training loss noted, ASR result added to caveats)
+
+The MR-STFT loss change (Comunita, Steinmetz, Phan, Reiss "Modelling Black-Box Audio Effects with Time-Varying Feature Modulation," ICASSP 2023) is the load-bearing improvement: visibly cleaner bench spectrogram and 18 dB less aliasing at 8 kHz per ASR. Held-out ESR is unchanged at +1.1 dB but the metric is already documented as a poor fit for nonlinear effect generalisation.
+
+---
+
+## C++ loader bug: JSON key prefix mismatch
+
+First attempt to load dist_07 in the opcode crashed at note-on (signal 22). Root cause: `model_distortion.py` was refactored during dist_06 to rename `self.gru` to `self.rnn` (so an LSTM variant could be selected via a `cell` parameter), so all training runs from dist_06 onward export JSON keys with the `rnn.*` prefix. The C++ loader in `src/csound_opcode/distnn.cpp` was hardcoded to look for `gru.*` keys per the dist_05 convention, so `RTNeural::torch_helpers::loadGRU` silently failed to populate the weights and the model evaluated with uninitialised state.
+
+Fixed by changing the key prefix in `distnn.cpp` from `"gru."` to `"rnn."` and rebuilding via `cmake --build build --config Release --target distnn`. `eval_distortion.py` was already doing this remap transparently with `state = {k.replace('gru.', 'rnn.'): v for k, v in state.items()}`, which is why eval pipelines worked across both vintages but the opcode did not. The legacy dist_05 weights file is no longer loadable by the rebuilt opcode; if needed, it would have to be re-exported with the key prefix renamed back to `gru.*`.
+
+`moognn.cpp` is unaffected. The Moog models (`model_concat.py`, `model_film.py`) still use `self.gru`, so their JSON keys match the `gru.*` prefix the Moog opcode expects.

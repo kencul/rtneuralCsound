@@ -15,7 +15,7 @@ nchnls = 1
 massign 0, 1
 
 instr 99
-  iignore distnn_preload "models/dist_05_gru128/weights.json"
+  iignore distnn_preload "models/dist_07_gru128_mrstft/weights.json"
 endin
 
 instr 1
@@ -29,7 +29,7 @@ instr 1
   kmix   ctrl7 1, 14, 0, 1
   kmix   = portk:k(kmix, 0.01)
 
-  aout   distnn asine, "models/dist_05_gru128/weights.json", kmix
+  aout   distnn asine, "models/dist_07_gru128_mrstft/weights.json", kmix
          out asine
 
 endin

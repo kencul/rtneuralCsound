@@ -52,12 +52,12 @@ struct DistNN : csnd::Plugin<1, 3> {
     const nlohmann::json &j = g_json_cache[path];
     model = new Model();
 
-    // dist_05 weights were exported before model_distortion.py renamed self.gru
-    // to self.rnn, so JSON keys use the "gru." prefix. eval_distortion.py remaps
-    // this transparently; the C++ loader must match the actual JSON key prefix.
+    // model_distortion.py uses self.rnn (renamed from self.gru when LSTM support
+    // was added in dist_06), so JSON keys are "rnn.*". Older dist_05 weights with
+    // "gru.*" keys must be re-exported with the legacy prefix renamed.
     RTNeural::torch_helpers::loadConv1D<float>(j, "conv.conv.",
                                                model->conv.get<0>());
-    RTNeural::torch_helpers::loadGRU<float>(j, "gru.", model->rec.get<0>());
+    RTNeural::torch_helpers::loadGRU<float>(j, "rnn.", model->rec.get<0>());
     RTNeural::torch_helpers::loadDense<float>(j, "dense.", model->rec.get<1>());
 
     model->conv.reset();

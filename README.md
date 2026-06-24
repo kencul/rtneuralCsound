@@ -250,11 +250,11 @@ Opcode signature: `aout distnn ain, Spath, kmix`
 - `Spath`: path to the model JSON weights file
 - `kmix`: wet/dry blend, k-rate (0 = dry, 1 = fully wet)
 
-Deployed model: `models/dist_05_gru128/weights.json` (GRU 128 units, trained on `distortionGigaTestAudio`).
+Deployed model: `models/dist_07_gru128_mrstft/weights.json` (GRU 128 units, trained on `distortionGigaTestAudio` with L1 + multi-resolution STFT loss per Comunita et al. ICASSP 2023).
 
 Use `distnn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires. See `csound/test_distnn.csd` for a working example.
 
-**Caveats:** held-out ESR is positive (+1.1 dB on bench) — the model captures the spectral character of the distortion but cannot reproduce the exact waveform on unseen audio. Polyphony ceiling is ~6 voices (same GRU size as the deployed Moog model).
+**Caveats:** held-out ESR is positive (+1.1 dB on bench), so the model does not reproduce the exact waveform on unseen audio, but the spectrogram character matches closely and aliasing is low (ASR around -43 dB from 500 Hz to 4 kHz, -40 dB at 8 kHz). Polyphony ceiling is ~6 voices (same GRU size as the deployed Moog model).
 
 ## Distortion modeling
 
