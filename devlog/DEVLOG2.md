@@ -1134,3 +1134,235 @@ First attempt to load dist_07 in the opcode crashed at note-on (signal 22). Root
 Fixed by changing the key prefix in `distnn.cpp` from `"gru."` to `"rnn."` and rebuilding via `cmake --build build --config Release --target distnn`. `eval_distortion.py` was already doing this remap transparently with `state = {k.replace('gru.', 'rnn.'): v for k, v in state.items()}`, which is why eval pipelines worked across both vintages but the opcode did not. The legacy dist_05 weights file is no longer loadable by the rebuilt opcode; if needed, it would have to be re-exported with the key prefix renamed back to `gru.*`.
 
 `moognn.cpp` is unaffected. The Moog models (`model_concat.py`, `model_film.py`) still use `self.gru`, so their JSON keys match the `gru.*` prefix the Moog opcode expects.
+
+---
+
+## Opcode performance benchmarking: plan
+
+**Goal.** Quantify the cost and real-time correctness of the deployed opcodes, and produce one headline figure plus one headline table for the Csound paper. The benchmarking is not a deliverable on its own; it exists to answer two questions the reader will have: "what does it cost to use a neural network instead of native DSP?" and "where on the cost / accuracy frontier do the deployed models sit?"
+
+**Scope discipline.** Limit measurements to what supports those two questions. Skip table-stakes data that does not advance the argument: cross-sample-rate sweeps, JSON load timing, libtorch / ONNX comparisons (the latter already covered by Chowdhury "RTNeural: Fast Neural Inferencing for Real-Time Systems," arXiv 2021).
+
+### Test rig
+
+| Component  | Spec |
+|------------|------|
+| CPU        | AMD Ryzen 5 5600X |
+| OS         | Windows |
+| Compiler   | MSVC (exact version recorded at run time) |
+| Build type | Release with current CMake config |
+| Csound     | Version recorded at run time |
+| Power plan | High Performance (CPU boost variability suppressed) |
+
+All headline measurements taken on this machine. If included, M1 results appear only as a single-row footnote in the headline table; cross-architecture comparison is out of scope.
+
+### Measurement matrix
+
+| Target | Sweep | Output metric |
+|--------|-------|---------------|
+| moognn at GRU 32 / 64 / 128 / 256 units | single voice, 60 s offline render | samples/sec |
+| RKSimulationModel (native DSP Moog ladder) | single channel, 60 s synthetic input | samples/sec |
+| moognn (deployed 128u) | polyphony 1 to failure | samples/sec per voice count |
+| distnn (deployed 128u) | polyphony 1 to failure | samples/sec per voice count |
+| distnn (deployed), polyphony = cliff - 1 | per-block timing log over 60 s | mean / p99 / max ms per ksmps block |
+
+Each measurement repeated N=5 times; median reported.
+
+**Why moognn only for the frontier.** GRU cost per sample is determined by `(input_dim + hidden_dim) x hidden_dim x 3` matrix multiplies. moognn and distnn differ only by one GRU input channel (knob vs no knob), which is 0.7% of operations at 128 units. distnn cost tracks moognn within 1% at matched hidden size. Stating the equivalence in the paper saves the redundant measurement.
+
+**Why no DSP baseline for distnn.** The distortion model targets a hardware breadboard pedal, not a digital algorithm. There is no native DSP reference to compare against. distnn appears in the polyphony and jitter measurements only.
+
+### Trained models needed
+
+| GRU size | Existing | To train |
+|----------|----------|----------|
+| 32       | no       | yes      |
+| 64       | run 16   | no       |
+| 128      | run 19   | no       |
+| 256      | no       | yes      |
+
+Both new runs use the same training config as run 19, varying only `GRU_HIDDEN`. Approximately 30 minutes total training time. ESR is evaluated on the same standard bench cutoff grid as the existing runs so the four points share an x-axis on the frontier plot.
+
+### Build sequence
+
+1. Create `bench/` directory with `bench/results/` for raw output and figures.
+2. Write `bench_dsp.cpp`: wrap `RKSimulationModel` from `vendor/MoogLadders/` in a tight per-sample processing loop matching the opcode's interface. Compile as a separate CMake target alongside `moogGen`.
+3. Write `bench_opcode.csd`: parameterised score template using Csound macros for opcode name, weights path, polyphony count, and duration. Offline render via `-o file.wav`.
+4. Write `bench/run_benchmarks.py`: driver that invokes Csound and the DSP binary via subprocess, times each invocation with `time.perf_counter()`, appends to `bench/results/raw.csv`.
+5. Train moognn at 32 and 256 units (`models/run_24_32u/`, `models/run_25_256u/` or equivalent). Evaluate ESR on standard cutoffs.
+6. Run the full measurement matrix.
+7. Write `bench/plot_results.py`: read `raw.csv`, generate `cost_frontier.png` (moognn at four sizes plus DSP baseline) and `headline_table.md`.
+8. Extract the jitter sentence from the per-block timing log.
+9. Append the results section to DEVLOG2.md.
+
+### Headline outputs
+
+1. **`cost_frontier.png`.** Scatter or line plot. X-axis: ESR (dB) on standard bench cutoff grid. Y-axis: samples/sec at single voice. Four moognn points, one horizontal reference line or annotated point for the DSP baseline. Deployed model size annotated.
+2. **`headline_table.md`.** Rows for moognn (deployed 128u) and distnn (deployed 128u). Columns: single-voice samples/sec, max sustainable polyphony at 48 kHz / ksmps=64, memory per voice. Reproducibility footnote referencing the rig spec.
+3. **Jitter sentence.** One line in prose summarising the per-block timing distribution at near-cliff polyphony. Confirms or flags real-time correctness.
+
+### Reproducibility
+
+`bench/README.md` documents the test rig spec, exact build steps, and how to reproduce all numbers from a fresh checkout. Anything that varies run-to-run (CPU boost residual variance, background processes, Windows scheduler decisions) is documented as a caveat. The csv at `bench/results/raw.csv` is committed so anyone can regenerate the figure without re-running benchmarks.
+
+### Out of scope (deferred)
+
+- Cross-sample-rate / cross-ksmps sweeps. Useful for a deployment guide, not for the paper's argument.
+- M1 / ARM measurements beyond a footnote.
+- libtorch / ONNX runtime comparisons.
+- GCN-3 polyphony comparison. Becomes relevant if and when the GCN-3 pivot is attempted; currently deferred.
+
+## DSP baseline results and Csound moogladder review
+
+### `bench_dsp` results (5600X, k-rate, block=64, sr=48k)
+
+Raw CSV at [bench/results/dsp_5600x_kr.csv](../bench/results/dsp_5600x_kr.csv). Source: [bench/bench_dsp.cpp](../bench/bench_dsp.cpp).
+
+| Voices | wall ms (median) | RTF    | CPU % | voices @ realtime |
+|--------|------------------|--------|-------|-------------------|
+| 1      | 234.0            | 0.0234 | 2.34  | 42                |
+| 2      | 467.8            | 0.0468 | 4.68  | 42                |
+| 4      | 935.7            | 0.0936 | 9.36  | 42                |
+| 8      | 1871.4           | 0.1871 | 18.71 | 42                |
+| 16     | 3744.9           | 0.3745 | 37.45 | 42                |
+| 32     | 7486.1           | 0.7486 | 74.86 | 42                |
+| 64     | 14971.8          | 1.4972 | 149.7 | 42                |
+
+Scaling is perfectly linear (per-voice cost constant across polyphony). Trial-to-trial variance under 0.3%. RKSimulationMoog from [vendor/MoogLadders/](../vendor/MoogLadders/) ceilings at 42 simultaneous voices on this rig.
+
+### Csound moogladder implementation review
+
+Reviewed [vendor/csound/Opcodes/newfils.c](../vendor/csound/Opcodes/newfils.c) (functions `moogladder_init`, `moogladder_process` at lines 66-164) to fact-check the comparison framing.
+
+**What `moogladder` actually does:**
+- Full `tanh` nonlinearity per stage (not linearized)
+- Euler ODE integration with 2x oversampling per audio sample (inner `for (j = 0; j < 2; j++)` loop)
+- Polynomial frequency / resonance correction (`fcr`, `acr`) for tuning accuracy
+- Double precision throughout
+- Implementation matches Huovilainen, "Non-Linear Digital Implementation of the Moog Ladder Filter," DAFx 2004
+
+`moogladder2` (lines 461-541) is the same algorithm with `tanh` replaced by a fast polynomial approximation `TanH()`.
+
+### Implications for the paper framing
+
+The "linearized DSP vs. nonlinear neural" angle does not hold. Both moogladder and RKSimulationMoog use full tanh per stage; both are ODE-based nonlinear models.
+
+The real difference between the two is integration accuracy: Euler with 2x oversampling has O(h^2) local error vs. RK4's O(h^5). Audible divergence concentrates at high cutoff and high resonance where Euler accumulates frequency warping and instability. RKSimulationMoog is the more accurate reference, which retroactively justifies using it as the training target.
+
+Revised framing for the paper:
+1. Lead with **learning-from-data** as the value proposition, not accuracy. The architecture and training pipeline transfer directly to hardware recordings (evidenced by distnn). moogladder cannot.
+2. The accuracy claim becomes secondary and narrower: "our model matches RK4-quality response; moogladder's Euler-2x integration shows measurable error above ~10 kHz cutoff."
+3. moognn is more expensive per voice than both DSP options. State this directly; do not frame the comparison around cost.
+
+### Action items
+
+- Add `moogladder` benchmark to the measurement matrix. Same Csound bench infrastructure planned for moognn polyphony; one extra row in the headline table.
+- Treat `moogladder` as the "what a Csound user would otherwise use" baseline. RKSimulationMoog remains the "accuracy ceiling" baseline.
+- Update README opcode section once benchmark numbers are in to drop any implied accuracy advantage over moogladder without supporting measurement.
+
+## Frontier point: run 24 (32u moognn)
+
+Trained for the CPU vs. accuracy frontier. Same config as run 19, only `GRU_HIDDEN=32`. Eval at [models/run_24_32u/evalOutput.txt](../models/run_24_32u/evalOutput.txt).
+
+| Freq (Hz) | 32u (run 24) | 64u (run 16) | 128u (run 19) |
+|-----------|--------------|--------------|---------------|
+| 100       | -31.2        | -34.0        | -34.7         |
+| 250       | -37.9        | -37.3        | -41.9         |
+| 1000      | -39.4        | -42.8        | -46.7         |
+| 4000      | -41.0        | -45.3        | -46.6         |
+| 16000     | -46.1        | -48.2        | -53.7         |
+| 20000     | -44.8        | -46.8        | -52.6         |
+| **mean**  | **-39.7**    | **-42.3**    | **-45.9**     |
+
+Existing eval files for comparison: [models/16_moog_100-20k_64u_w256/eval/evalOutput.txt](../models/16_moog_100-20k_64u_w256/eval/evalOutput.txt), [models/19_moog_100-20k_128u_w256/eval/evalOutput.txt](../models/19_moog_100-20k_128u_w256/eval/evalOutput.txt).
+
+Frontier spacing: 32→64 = +2.6 dB, 64→128 = +3.6 dB mean ESR improvement. Clean diminishing-returns curve. All cutoffs pass the "good" threshold even at 32u. Low cutoffs (100-250 Hz) are the weakest band across all sizes; long time constants are harder to maintain with smaller GRU state. 256u (run 25) in progress and expected to fill the top of the curve.
+
+## Benchmark infrastructure: complete
+
+All tooling is built and tested. Awaiting run_25 training completion and an idle machine window to run the full matrix.
+
+### Harness components
+
+| File | Purpose |
+|------|---------|
+| [bench/bench_dsp.cpp](../bench/bench_dsp.cpp) | Standalone C++ binary, RKSimulationMoog. `--cutoff-mode kr` matches opcode k-rate dispatch; `--cutoff-mode ar` matches sweep_ref per-sample updates. |
+| [bench/bench_opcode.csd](../bench/bench_opcode.csd) | Parameterised Csound score. Macros: `INSTR` (1=moognn, 2=distnn, 3=moogladder), `VOICES`, `DUR`, `WEIGHTS`. Spawns N simultaneous voices via `schedule` at t=0; self-terminates via `event "e"` after `$DUR` seconds. |
+| [bench/run_benchmarks.py](../bench/run_benchmarks.py) | Driver: iterates the measurement matrix, wraps each Csound invoke with `time.perf_counter()`, drops slowest trial, writes `bench/results/opcode.csv`. |
+| [bench/plot_results.py](../bench/plot_results.py) | Reads `opcode.csv` + `dsp_5600x_kr.csv` + `evalOutput.txt` files; generates `cost_frontier.png`, `polyphony_plot.png`, `headline_table.md`. Runs with partial data (skips missing configs gracefully). |
+| [bench/README.md](../bench/README.md) | Rig spec, build steps, full flag reference for all four tools, CSV schema, measurement caveats. |
+
+### Design decisions
+
+`bench_opcode.csd` uses `event "e", 0, 0` from within the spawner instrument to terminate performance after `$DUR` seconds rather than relying on `f 0 N` in the score. Score macros (`--omacro`) do not expand in the `<CsScore>` section; duration control must live in the orchestra.
+
+Timing includes Csound startup (~100 ms JSON parse). At `--dur 10` this is under 1% of total wall time and is consistent across all opcode runs, so it does not affect relative comparisons.
+
+moogladder is included in the opcode matrix (INSTR=3) to serve as the "what a Csound user would otherwise use" baseline. It benchmarks through the same Csound path as the neural opcodes, giving a fair apples-to-apples cost comparison. See the moogladder source review above (Huovilainen DAFx 2004) for implementation context.
+
+### ESR values ready for plotting
+
+Parsed from static bench eval outputs:
+
+| Label | Mean ESR (dB) | Eval file |
+|-------|---------------|-----------|
+| moognn_32u | -39.6 | [models/run_24_32u/evalOutput.txt](../models/run_24_32u/evalOutput.txt) |
+| moognn_64u | -42.3 | [models/16_moog_100-20k_64u_w256/eval/evalOutput.txt](../models/16_moog_100-20k_64u_w256/eval/evalOutput.txt) |
+| moognn_128u | -45.9 | [models/19_moog_100-20k_128u_w256/eval/evalOutput.txt](../models/19_moog_100-20k_128u_w256/eval/evalOutput.txt) |
+| moognn_256u | pending | models/run_25_256u/evalOutput.txt |
+
+### Remaining steps
+
+1. Finish run_25 (256u) training and evaluate on standard bench grid.
+2. Run `python bench/run_benchmarks.py` on idle machine (no training in parallel). Estimated 15-20 min.
+3. Run `python bench/plot_results.py` to generate paper figures.
+4. Write results section in DEVLOG2.md with final numbers.
+5. Update README.md opcode section with confirmed polyphony ceilings.
+
+---
+
+## Bench harness review fixes
+
+Pre-benchmark review of the harness surfaced four small issues:
+
+1. `bench_dsp.cpp` used `std::sinf`, a non-standard MSVC extension. Replaced with `std::sin` (the float overload in `<cmath>`) so the binary builds on clang/gcc as well.
+2. `plot_results.py` opened files without `encoding="utf-8"`, which on Windows defaults to cp1252 and corrupted the em-dash in `headline_table.md`. Both the ESR read and the table write now specify utf-8.
+3. `RKSimulationMoog` has no public `Reset`, so `bench_dsp` reuses voice state across trials. The Process loop has no state-dependent branches and trial-to-trial variance is under 0.3%, so timing is unaffected. Documented in `bench/README.md` so it does not surprise anyone reading the harness later.
+4. `dsp_5600x_kr.csv` had accumulated three partial runs (48 rows total) because `bench_dsp` opens the CSV in append mode. Deduplicated to one clean run of 28 rows (7 voice counts x 4 trials). The append behaviour is documented but the canonical file is now a single coherent run.
+
+---
+
+## moognn opcode templated across hidden sizes
+
+### The bug
+
+Smoke testing the bench pipeline with `python bench/run_benchmarks.py --only moognn_32u` produced an empty WAV and an opaque "ERROR trial N" from the driver. Direct invocation of Csound revealed the actual cause: `csound command: received signal 11` (SIGSEGV) inside `moognn.dll` when loading the 32u weights.
+
+Root cause: `RTNeural::ModelT` is a compile-time template with fixed layer shapes. `moognn.cpp` baked in `GRULayerT<float, 17, 128>` and `DenseT<float, 128, 1>`, so any model whose hidden size differed from 128 wrote weights into wrong-sized buffers and crashed the GRU constructor. The same crash would have hit run_25 (256u) once training finished.
+
+The driver's error reporting masked it. `run_benchmarks.py` only printed the last 400 chars of stderr, which on a non-zero exit was just the Csound startup banner; the actual signal-11 line appeared earlier and was truncated.
+
+### Fix: template `MoogNN` on hidden size
+
+`moognn.cpp` refactored so `Model` and `MoogNN` take an `int H` template parameter. The conv stage is unchanged (1 to 16 channels, kernel 31, size-independent). `RecurrentStage<H>` and `Model<H>` carry the size through to RTNeural's compile-time shapes. `on_load` registers four opcodes from the same DLL:
+
+```cpp
+csnd::plugin<MoogNN<32>>(csound, "moognn32",  "a", "aSk", csnd::thread::ia);
+csnd::plugin<MoogNN<64>>(csound, "moognn64",  "a", "aSk", csnd::thread::ia);
+csnd::plugin<MoogNN<128>>(csound, "moognn128", "a", "aSk", csnd::thread::ia);
+csnd::plugin<MoogNN<256>>(csound, "moognn256", "a", "aSk", csnd::thread::ia);
+```
+
+Each instantiation gets its own fully-unrolled GRU inference path, so per-size measurement reflects the real deployed inference cost. The shared `moognn_preload` (JSON cache pre-warm) is unchanged.
+
+The deployed name moved from `moognn` to `moognn128` for parallel naming with the other sizes; there is no `moognn` alias.
+
+### Caller updates
+
+- `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` switched to `moognn128`.
+- `bench/bench_opcode.csd` reads a new `$OPCODE` macro (default `moognn128`); instr 1 invokes the size-specific opcode via macro substitution.
+- `bench/run_benchmarks.py` carries an `OPCODE_NAMES` dict that maps each moognn label to its opcode name, passed through as `--omacro:OPCODE=`.
+
+### Smoke test after the refactor
+
+`moognn32` loaded `run_24_32u/weights.json` and rendered cleanly. `moognn128` loaded `run_19/weights.json` and produced the expected output. Single-voice cost at `--dur 2`: 32u 147 ms (rtf 0.073, cpu 7.4%), 128u 739 ms (rtf 0.37, cpu 37%). The ratio is roughly 5x rather than the theoretical 16x because Csound startup and JSON parse are a much larger share of wall time at this duration. The full benchmark uses `--dur 10`, dropping startup to about 5% of wall time. Numbers from the smoke test are sanity-check only, not the final figure.

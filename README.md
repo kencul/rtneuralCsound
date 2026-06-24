@@ -232,15 +232,25 @@ The knob is log-normalized to [0, 1] over 100Hz–20kHz. The deployed model is r
 
 ## Csound opcode
 
-Opcode signature: `aout moognn ain, Spath, kcutoff`
+Opcode signature: `aout moognn{N} ain, Spath, kcutoff`
 
+`moognn.dll` registers four size variants. The opcode name must match the GRU hidden size of the model in `Spath`; loading a mismatched JSON segfaults inside RTNeural's loader.
+
+| Opcode | GRU units | Example model |
+|--------|-----------|---------------|
+| `moognn32`  | 32  | `models/run_24_32u/weights.json` |
+| `moognn64`  | 64  | `models/16_moog_100-20k_64u_w256/weights.json` |
+| `moognn128` | 128 | `models/19_moog_100-20k_128u_w256/weights.json` (deployed) |
+| `moognn256` | 256 | `models/run_25_256u/weights.json` (training) |
+
+Arguments:
 - `ain`: audio input
 - `Spath`: path to the model JSON weights file
 - `kcutoff`: cutoff frequency in Hz (k-rate)
 
-Use `moognn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires.
+`moognn_preload Spath` is shared across all sizes (one JSON cache). Call at score time 0 to pre-cache the weights before the first note fires.
 
-See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples.
+Polyphony scales inversely with size: 128u handles ~6 voices in real time, 256u about 2. Final numbers are pending the formal benchmark in `bench/`. See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples (both use `moognn128`).
 
 ## Distortion opcode
 

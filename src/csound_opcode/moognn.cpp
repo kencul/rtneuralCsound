@@ -58,18 +58,22 @@ struct KnobToH0 {
   }
 };
 
+// Conv stage is size-independent (1 -> 16 channels, kernel 31). The GRU/Dense
+// shapes vary with hidden size H, so RecurrentStage and Model are templated.
 using ConvStage =
     RTNeural::ModelT<float, 1, 16, RTNeural::Conv1DT<float, 1, 16, 31, 1>>;
 
+template <int H>
 using RecurrentStage =
-    RTNeural::ModelT<float, 17, 1, RTNeural::GRULayerT<float, 17, 128>,
-                     RTNeural::DenseT<float, 128, 1>>;
+    RTNeural::ModelT<float, 17, 1, RTNeural::GRULayerT<float, 17, H>,
+                     RTNeural::DenseT<float, H, 1>>;
 
+template <int H>
 struct Model {
   ConvStage conv;
   LayerNorm norm;
   KnobToH0 h0net;
-  RecurrentStage rec;
+  RecurrentStage<H> rec;
 };
 
 // Cache parsed JSON by path — eliminates file I/O on every note-on.
@@ -82,9 +86,14 @@ static std::unordered_map<std::string, nlohmann::json> g_json_cache;
 // a 2048-sample warmup after h0 seeding, so some convergence time still exists.
 static constexpr uint32_t FADE_SAMPLES = 256;
 
-// moognn aout, ain, Spath, kcutoff
+// moognn<H> aout, ain, Spath, kcutoff
+// Registered under size-specific names (moognn32, moognn64, moognn128,
+// moognn256) so each instance has the correct compile-time GRU/Dense shape.
+// Loading a JSON whose hidden size != H would silently segfault inside
+// RTNeural's loader, so callers must pick the matching opcode for their model.
+template <int H>
 struct MoogNN : csnd::Plugin<1, 3> {
-  Model *model = nullptr;
+  Model<H> *model = nullptr;
   uint32_t fade_counter = 0;
 
   int init() {
@@ -101,7 +110,7 @@ struct MoogNN : csnd::Plugin<1, 3> {
     }
 
     const nlohmann::json &j = g_json_cache[path];
-    model = new Model();
+    model = new Model<H>();
 
     RTNeural::torch_helpers::loadConv1D<float>(j, "conv.conv.",
                                                model->conv.get<0>());
@@ -191,7 +200,10 @@ struct MoogNNPreload : csnd::Plugin<1, 1> {
 };
 
 void csnd::on_load(csnd::Csound *csound) {
-  csnd::plugin<MoogNN>(csound, "moognn", "a", "aSk", csnd::thread::ia);
+  csnd::plugin<MoogNN<32>>(csound, "moognn32", "a", "aSk", csnd::thread::ia);
+  csnd::plugin<MoogNN<64>>(csound, "moognn64", "a", "aSk", csnd::thread::ia);
+  csnd::plugin<MoogNN<128>>(csound, "moognn128", "a", "aSk", csnd::thread::ia);
+  csnd::plugin<MoogNN<256>>(csound, "moognn256", "a", "aSk", csnd::thread::ia);
   csnd::plugin<MoogNNPreload>(csound, "moognn_preload", "i", "S",
                               csnd::thread::i);
 }
