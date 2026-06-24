@@ -1070,3 +1070,45 @@ All three models are clean at 500 to 4000 Hz (around -43 dB across the board). T
 The dist_08 regression is more surprising. dist_08 was trained with the same loss as dist_07 plus a DC term, but its aliasing profile reverted to dist_05's level. The most likely cause is the LR reduction from 3e-4 to 1e-4 that was forced by NaN instability when the DC term was added. The slower optimisation appears to have settled into a different local minimum that achieves equivalent combined val loss without dist_07's aliasing suppression. This is the third negative result for the DC term experiment, following the marginal spectrogram regression and the lack of measurable DC drift during training.
 
 **Conclusion.** dist_07 remains the best model and is now the canonical baseline. Anti-aliasing fine-tuning (Carson, Wright, Bilbao, "Anti-aliasing of neural distortion effects via model fine tuning," DAFx 2025) drops to lower priority: MR-STFT is already providing most of what teacher-student fine-tuning would deliver. The remaining held-out bench gap (+1.1 dB ESR) is now confirmed not to be an aliasing issue, which leaves exposure bias as the next-most-likely contributor (Peussa, Damskagg, Sherson, Mimilakis, Juvela, Gotsopoulos, Valimaki, "Exposure Bias and State Matching in Recurrent Neural Network Virtual Analog Models," DAFx 2021). The model has only been trained on 8192-sample windows (about 170 ms), but bench is several minutes long, so state errors compound over sequences the network has never seen during training. The next experiment is to retrain dist_07's configuration with substantially longer windows (32k or 65536 samples) and re-evaluate held-out bench.
+
+---
+
+## Run dist_09 setup: longer training windows
+
+**Hypothesis.** Exposure bias (Peussa et al. DAFx 2021) is the remaining candidate after ASR ruled out aliasing. The dist_07 GRU was trained on 8192-sample windows (about 170 ms), but bench is several minutes long. At inference the network must maintain a coherent hidden state over spans roughly 1000x longer than anything it saw during training, so small per-sample state errors can compound across hundreds of thousands of samples that were never under gradient pressure. Training with substantially longer windows should mitigate this by forcing the GRU to keep its state consistent across longer horizons.
+
+**Changes from dist_07.** Only `window_size` changed: 8192 to 32768 (about 683 ms, 4x longer). Batch size reduced from 64 to 32 to fit GPU memory. Loss, model, warmup, LR (3e-4), clip norm (0.5), and val split are all identical to dist_07. Total audio is unchanged, so the model sees the same data, just split into fewer, longer chunks.
+
+---
+
+## Run dist_09 results
+
+Training completed in 49 minutes (133 epochs, early stopped, patience 40). Best val_loss 0.3619 at approximately epoch 93. Per-epoch time was 22 s vs dist_07's 6 s (~4x slower due to longer sequences) but with 4x fewer windows per epoch, giving roughly equivalent total compute. No instability.
+
+Best val_loss is essentially identical across all three runs (dist_07: 0.3592, dist_08: 0.3616, dist_09: 0.3619). Val loss is not the discriminating metric here because val windows are also 32k samples in dist_09, so the model is matched to its own training regime. The meaningful test is held-out bench.
+
+| Pair       | Split    | dist_05 | dist_07 | dist_09 |
+|------------|----------|---------|---------|---------|
+| bench      | held-out | 1.1     | 1.1     | 1.4     |
+| bench-10dB | held-out | 1.4     | 1.4     | 1.3     |
+| giga       | train    | -18.6   | -15.0   | -8.3    |
+| giga-10dB  | train    | -16.6   | -10.4   | -9.2    |
+
+| Test freq | dist_07 | dist_09 |
+|-----------|---------|---------|
+| 500 Hz    | -43.1   | -42.2   |
+| 1000 Hz   | -43.5   | -43.1   |
+| 2000 Hz   | -43.5   | -43.5   |
+| 4000 Hz   | -43.4   | -42.0   |
+| 8000 Hz   | -39.6   | -31.6   |
+| mean      | -42.7   | -40.5   |
+
+**Bench is statistically flat across all three runs.** Held-out ESR moved from +1.1 dB to +1.4 dB at full level and from +1.4 dB to +1.3 dB at -10 dB, within run-to-run noise. The exposure-bias hypothesis predicted that 4x longer training windows would reduce drift on the multi-minute bench file. They did not.
+
+**Train ESR regressed by 5 to 7 dB.** This is consistent with longer windows forcing a more "generalist" optimisation that no longer overfits short-window patterns. Combined with 4x fewer gradient updates per epoch, this is what you would expect if exposure bias mitigation were trading train fidelity for held-out generalisation. Since bench did not improve, the trade produced no net benefit.
+
+**ASR at 8 kHz regressed by 8 dB** (-31.6 vs -39.6). Low/mid frequencies unchanged. Same explanation: fewer effective gradient updates means slightly less precise high-frequency learning. Still well above dist_05's -21 dB so the broader MR-STFT win is preserved.
+
+**Analysis.** Three hypotheses were on the table for the held-out bench gap after the literature review: aliasing, exposure bias, and training-data diversity. ASR ruled out aliasing. dist_09 now rules out exposure bias. Training-data diversity is the only remaining hypothesis and is not testable with another training run on the existing data. Wilczek et al. (DAFx 2022) used 8 minutes of mixed guitar and bass for their diode clipper models; GigaTestAudio is 17 minutes but the timbral diversity within it may still be the limit on what the model can generalise to.
+
+**Conclusion.** dist_07 remains the canonical distortion model. All training-loop experiments have been exhausted as candidates for closing the bench gap. Three branches remain: ship dist_07 as the final opcode weights and move toward the Csound paper writeup, record more diverse pedal data and retrain, or pivot to architecture (GCN-3 per Comunita, Steinmetz, Phan, Reiss "Modelling Black-Box Audio Effects with Time-Varying Feature Modulation," ICASSP 2023) for polyphony gains independent of bench accuracy.

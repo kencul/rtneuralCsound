@@ -35,7 +35,7 @@ sys.stderr = _Tee(sys.__stderr__, _log)
 
 GRU_HIDDEN  = 128
 CELL        = 'gru'
-window_size = 8192
+window_size = 32768
 warmup_size = 256
 VAL_FRAC    = 0.2
 SEED        = 42
@@ -104,10 +104,10 @@ Y_train = torch.tensor(Y_train, dtype=torch.float32).to(device)
 X_val   = torch.tensor(X_val,   dtype=torch.float32).to(device)
 Y_val   = torch.tensor(Y_val,   dtype=torch.float32).to(device)
 
-train_loader = DataLoader(TensorDataset(X_train, Y_train), batch_size=64, shuffle=True)
+train_loader = DataLoader(TensorDataset(X_train, Y_train), batch_size=32, shuffle=True)
 
 model     = Model(gru_hidden=GRU_HIDDEN, cell=CELL).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20, factor=0.5, min_lr=1e-6)
 
 _MRSTFT_PARAMS = [
@@ -124,14 +124,7 @@ def _stft_log_mag(x, fft_size, hop_size, win_length):
     return torch.log(mag)
 
 
-# DC loss per Wilczek et al. (DAFx 2022) eq. (5). Penalises mean-offset
-# drift that log-magnitude losses are blind to (low-freq bins contribute
-# little energy to the STFT, so DC errors slip through unchecked).
-def dc_loss(p, t):
-    return torch.mean(t - p) ** 2 / (torch.mean(t ** 2) + 1e-8)
-
-
-# L1 + log-magnitude MR-STFT per Comunita et al. (ICASSP 2023) + DC term.
+# L1 + log-magnitude MR-STFT per Comunita et al. (ICASSP 2023).
 # Spectral convergence omitted: its denominator norm can blow up on near-silent
 # windows, causing NaN gradients that corrupt weights irreversibly.
 def combined_loss(pred, target):
@@ -145,8 +138,7 @@ def combined_loss(pred, target):
             _stft_log_mag(t, fft_size, hop_size, win_length),
         )
     l_mrstft = l_mrstft / len(_MRSTFT_PARAMS)
-    l_dc = dc_loss(p, t)
-    return l_mae + l_mrstft + l_dc, l_mae, l_mrstft, l_dc
+    return l_mae + l_mrstft, l_mae, l_mrstft
 
 
 best_val_loss = float('inf')
@@ -160,39 +152,35 @@ train_start = time.time()
 for epoch in range(epochs):
     epoch_start = time.time()
     model.train()
-    train_loss = train_mae = train_mrstft = train_dc = 0.0
+    train_loss = train_mae = train_mrstft = 0.0
     for xb, yb in train_loader:
         optimizer.zero_grad()
         pred, _ = model(xb)
-        loss, l_mae, l_mrstft, l_dc = combined_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
+        loss, l_mae, l_mrstft = combined_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.3)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
         optimizer.step()
         n = len(xb)
         train_loss   += loss.item()     * n
         train_mae    += l_mae.item()    * n
         train_mrstft += l_mrstft.item() * n
-        train_dc     += l_dc.item()     * n
     train_loss   /= len(X_train)
     train_mae    /= len(X_train)
     train_mrstft /= len(X_train)
-    train_dc     /= len(X_train)
 
     model.eval()
     with torch.no_grad():
-        val_loss = val_mae = val_mrstft = val_dc = 0.0
+        val_loss = val_mae = val_mrstft = 0.0
         for xb, yb in DataLoader(TensorDataset(X_val, Y_val), batch_size=64):
             pred, _ = model(xb)
-            loss, l_mae, l_mrstft, l_dc = combined_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
+            loss, l_mae, l_mrstft = combined_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
             n = len(xb)
             val_loss   += loss.item()     * n
             val_mae    += l_mae.item()    * n
             val_mrstft += l_mrstft.item() * n
-            val_dc     += l_dc.item()     * n
         val_loss   /= len(X_val)
         val_mae    /= len(X_val)
         val_mrstft /= len(X_val)
-        val_dc     /= len(X_val)
 
     scheduler.step(val_loss)
 
@@ -211,8 +199,8 @@ for epoch in range(epochs):
 
     lr = optimizer.param_groups[0]['lr']
     epoch_time = time.time() - epoch_start
-    print(f"Epoch {epoch+1}/{epochs} - loss: {train_loss:.4f} (mae {train_mae:.4f} mrstft {train_mrstft:.4f} dc {train_dc:.6f})"
-          f" - val: {val_loss:.4f} (mae {val_mae:.4f} mrstft {val_mrstft:.4f} dc {val_dc:.6f})"
+    print(f"Epoch {epoch+1}/{epochs} - loss: {train_loss:.4f} (mae {train_mae:.4f} mrstft {train_mrstft:.4f})"
+          f" - val: {val_loss:.4f} (mae {val_mae:.4f} mrstft {val_mrstft:.4f})"
           f" - lr: {lr:.2e} - {epoch_time:.1f}s")
 
     if epochs_without_improvement >= early_stop_patience:
