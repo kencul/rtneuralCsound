@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
         voices.reserve(n_voices);
         for (int v = 0; v < n_voices; v++) {
             voices.emplace_back(cfg.sr);
-            voices.back().SetResonance(1.0f);
+            voices.back().SetResonance(0.5f);  // matches training data and bench_opcode.csd
         }
 
         printf("  voices=%-3d  warmup...", n_voices);

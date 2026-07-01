@@ -46,7 +46,8 @@ Research into neural network audio effect modeling using RTNeural, working towar
 │   │   └── sweep_ref.cpp               # sweep_ref: dynamic cutoff reference generator
 │   └── csound_opcode/
 │       ├── moognn.cpp                  # Csound plugin opcode (moognn.dll)
-│       └── distnn.cpp                  # Csound plugin opcode (distnn.dll)
+│       ├── distnn.cpp                  # Csound plugin opcode (distnn.dll)
+│       └── rkmoog.cpp                  # Csound plugin opcode (rkmoog.dll) - RK4 reference
 ├── csound/
 │   ├── test_passthrough.csd            # File playback through opcode with cutoff sweep
 │   ├── test_midi_saw.csd               # Live MIDI with CC-controlled cutoff
@@ -241,7 +242,7 @@ Opcode signature: `aout moognn{N} ain, Spath, kcutoff`
 | `moognn32`  | 32  | `models/25_moog_100-20k_32u/weights.json` |
 | `moognn64`  | 64  | `models/16_moog_100-20k_64u_w256/weights.json` |
 | `moognn128` | 128 | `models/19_moog_100-20k_128u_w256/weights.json` (deployed) |
-| `moognn256` | 256 | `models/26_moog_100-20k_256u/weights.json` (training) |
+| `moognn256` | 256 | `models/26_moog_100-20k_256u/weights.json` |
 
 Arguments:
 - `ain`: audio input
@@ -251,6 +252,18 @@ Arguments:
 `moognn_preload Spath` is shared across all sizes (one JSON cache). Call at score time 0 to pre-cache the weights before the first note fires.
 
 Polyphony scales inversely with size: 128u handles ~6 voices in real time, 256u about 2. Final numbers are pending the formal benchmark in `bench/`. See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples (both use `moognn128`).
+
+## RK reference opcode
+
+Opcode signature: `aout rkmoog ain, kcutoff, kresonance`
+
+Wraps `RKSimulationMoog` (RK4 integration, 8x oversampling — the same algorithm used to generate moognn training data) as a Csound opcode. Intended for apples-to-apples CPU benchmarking against moognn: identical Csound frame dispatch, k-rate cutoff updates, and MYFLT conversion overhead. No weights file; state resets to zero on note-on.
+
+- `ain`: audio input
+- `kcutoff`: cutoff frequency in Hz (k-rate)
+- `kresonance`: resonance 0–10 (k-rate); 0.5 matches training data
+
+Preliminary benchmark (Ryzen 5600X, 48 kHz, ksmps=64): ~4% CPU/voice, ~25 voices at realtime. Full numbers pending the formal benchmark run.
 
 ## Distortion opcode
 

@@ -2,6 +2,7 @@
 <CsOptions>
 --opcode-lib=build/bin/Release/moognn.dll
 --opcode-lib=build/bin/Release/distnn.dll
+--opcode-lib=build/bin/Release/rkmoog.dll
 -d
 -m0
 </CsOptions>
@@ -13,10 +14,10 @@ nchnls  = 1
 
 ; ----------------------------------------------------------------------
 ; Macros (set via --omacro:NAME=VALUE on the command line):
-;   INSTR    1=moognn, 2=distnn, 3=moogladder
+;   INSTR    1=moognn, 2=distnn, 3=moogladder, 4=rkmoog
 ;   OPCODE   moognn opcode name: moognn32 / moognn64 / moognn128 / moognn256
 ;            (must match the GRU hidden size in WEIGHTS; ignored for INSTR != 1)
-;   WEIGHTS  path to weights JSON (ignored by moogladder)
+;   WEIGHTS  path to weights JSON (ignored by moogladder and rkmoog)
 ;   VOICES   polyphony count
 ;   DUR      render duration in seconds
 ; Defaults below let the .csd run standalone for sanity checks.
@@ -62,10 +63,12 @@ instr 100
     schedule $INSTR, 0, $DUR
     iI = iI + 1
   od
-  ; Terminate performance once voices finish — "e" event ends the score.
-  kTime timeinsts
-  if kTime >= $DUR then
+  ; Terminate performance once voices finish. Latch prevents repeated "e" events.
+  kTime   timeinsts
+  kEnded  init 0
+  if kTime >= $DUR && kEnded == 0 then
     event "e", 0, 0
+    kEnded = 1
   endif
 endin
 
@@ -86,14 +89,23 @@ instr 2
           out     aOut
 endin
 
-; Voice 3: moogladder. Native Csound DSP baseline; resonance fixed to
-; match the value used when generating training data via sweep_ref.
+; Voice 3: moogladder. Native Csound DSP baseline.
 instr 3
   aIn     poscil      0.5, 440
   kCut    expon       100, p3, 20000
   kRes    =           0.5
   aOut    moogladder  aIn, kCut, kRes
           out         aOut
+endin
+
+; Voice 4: rkmoog. RK4 + 8x oversampled C++ reference; apples-to-apples
+; comparison with moognn. Same sweep and resonance as training data.
+instr 4
+  aIn     poscil  0.5, 440
+  kCut    expon   100, p3, 20000
+  kRes    =       0.5
+  aOut    rkmoog  aIn, kCut, kRes
+          out     aOut
 endin
 
 </CsInstruments>

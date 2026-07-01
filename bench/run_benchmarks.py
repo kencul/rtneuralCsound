@@ -75,6 +75,11 @@ def build_matrix(include_256u: bool) -> list:
         rows.append(dict(label="moogladder", instr=3, voices=v,
                          weights="", opcode=""))
 
+    # rkmoog RK4 reference polyphony sweep
+    for v in [1, 2, 4, 8, 16]:
+        rows.append(dict(label="rkmoog", instr=4, voices=v,
+                         weights="", opcode=""))
+
     return rows
 
 
@@ -103,7 +108,7 @@ def run_csound(instr: int, voices: int, dur: float, weights: str,
 
         if result.returncode != 0:
             print(f"  ERROR trial {t + 1}:")
-            print((result.stderr or result.stdout)[-400:])
+            print((result.stderr or result.stdout)[-4000:])
             continue
 
         times.append((t1 - t0) * 1000.0)

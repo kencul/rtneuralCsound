@@ -43,11 +43,12 @@ META = {
     "moognn_256u":  dict(gru=256, label="moognn 256u",              color="#AA3377", marker="o", ms=13),
     "distnn_128u":  dict(gru=128, label="distnn 128u (deployed)",   color="#CCBB44", marker="s", ms=9),
     "moogladder":   dict(gru=None, label="moogladder (Csound DSP)", color="#66CCEE", marker="^", ms=9),
+    "rkmoog":       dict(gru=None, label="rkmoog (RK4 opcode)",    color="#BB5500", marker="D", ms=8),
     "RKSimulation": dict(gru=None, label="RKSimulation (ODE ref.)", color="#AAAAAA", marker="D", ms=8),
 }
 
 NEURAL_ORDER    = ["moognn_32u", "moognn_64u", "moognn_128u", "moognn_256u"]
-POLYPHONY_ORDER = ["moognn_128u", "distnn_128u", "moogladder", "RKSimulation"]
+POLYPHONY_ORDER = ["moognn_128u", "distnn_128u", "moogladder", "rkmoog", "RKSimulation"]
 
 
 # ── ESR parsing ────────────────────────────────────────────────────────────────
@@ -104,50 +105,26 @@ def plot_frontier(agg, esr, out_path, show):
 
     fig, ax = plt.subplots(figsize=(7, 5))
 
-    # Scatter points: accuracy = -ESR dB (higher = better)
-    pts = []
     for label in neural:
         row = single[single["implementation"] == label]
         m   = META[label]
-        acc = -esr[label]
+        acc = esr[label]   # negative dB; axis will be inverted
         cpu = row["cpu_pct"].iloc[0]
-        pts.append((acc, cpu))
         ax.scatter(acc, cpu,
-                   color=m["color"], marker=m["marker"], s=m["ms"] ** 2,
+                   color=m["color"], marker=m["marker"], s=80,
                    zorder=3, label=m["label"])
 
-    # Pareto line connecting neural points (sorted by accuracy)
-    pts_sorted = sorted(pts, key=lambda p: p[0])
-    xs, ys = zip(*pts_sorted)
-    ax.plot(xs, ys, color="#cccccc", linestyle="--", linewidth=0.9, zorder=2)
+    ax.invert_xaxis()
+    ax.xaxis.set_major_formatter(
+        ticker.FuncFormatter(lambda x, _: f"−{abs(x):.0f} dB")
+    )
 
-    # Horizontal reference lines for DSP baselines
-    x_lo = min(xs) - 2.0
-    x_hi = max(xs) + 4.5
-    ax.set_xlim(x_lo, x_hi)
+    # Headroom so 256u point isn't clipped at the top
+    ax.set_ylim(bottom=0)
+    ymax = single[single["implementation"].isin(NEURAL_ORDER)]["cpu_pct"].max()
+    ax.set_ylim(top=ymax * 1.18)
 
-    for label in ("RKSimulation", "moogladder"):
-        row = single[single["implementation"] == label]
-        if row.empty:
-            continue
-        m   = META[label]
-        cpu = row["cpu_pct"].iloc[0]
-        ax.axhline(cpu, linestyle=":", color=m["color"], linewidth=1.2, zorder=1)
-        ax.text(x_hi - 0.2, cpu + 0.25, m["label"],
-                ha="right", va="bottom", fontsize=8, color=m["color"])
-
-    # Annotate deployed model
-    dep_row = single[single["implementation"] == "moognn_128u"]
-    if not dep_row.empty and esr.get("moognn_128u"):
-        acc = -esr["moognn_128u"]
-        cpu = dep_row["cpu_pct"].iloc[0]
-        ax.annotate("deployed",
-                    xy=(acc, cpu), xytext=(acc - 1.8, cpu + 2.0),
-                    fontsize=8, color=META["moognn_128u"]["color"],
-                    arrowprops=dict(arrowstyle="->",
-                                    color=META["moognn_128u"]["color"], lw=0.8))
-
-    ax.set_xlabel("Mean accuracy  (−ESR dB, higher = better)")
+    ax.set_xlabel("Mean ESR (dB)   more accurate  →")
     ax.set_ylabel("CPU % / voice  (single core, 48 kHz, ksmps=64)")
     ax.set_title("moognn: accuracy vs CPU cost per voice")
     ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f%%"))
@@ -213,6 +190,7 @@ def write_headline_table(agg, esr, out_path):
         ("moognn_256u",  "moognn 256u"),
         ("distnn_128u",  "distnn 128u (deployed)"),
         ("moogladder",   "moogladder (Csound DSP)"),
+        ("rkmoog",       "rkmoog (RK4 opcode)"),
         ("RKSimulation", "RKSimulation (ODE ref.)"),
     ]
 

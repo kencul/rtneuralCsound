@@ -1309,7 +1309,7 @@ Parsed from static bench eval outputs:
 | moognn_32u | -39.6 | [models/25_moog_100-20k_32u/eval/evalOutput.txt](../models/25_moog_100-20k_32u/eval/evalOutput.txt) |
 | moognn_64u | -42.3 | [models/16_moog_100-20k_64u_w256/eval/evalOutput.txt](../models/16_moog_100-20k_64u_w256/eval/evalOutput.txt) |
 | moognn_128u | -45.9 | [models/19_moog_100-20k_128u_w256/eval/evalOutput.txt](../models/19_moog_100-20k_128u_w256/eval/evalOutput.txt) |
-| moognn_256u | pending | models/26_moog_100-20k_256u/eval/evalOutput.txt |
+| moognn_256u | -47.9 | [models/26_moog_100-20k_256u/eval/evalOutput.txt](../models/26_moog_100-20k_256u/eval/evalOutput.txt) |
 
 ### Remaining steps
 
@@ -1366,3 +1366,50 @@ The deployed name moved from `moognn` to `moognn128` for parallel naming with th
 ### Smoke test after the refactor
 
 `moognn32` loaded `run_24_32u/weights.json` and rendered cleanly. `moognn128` loaded `run_19/weights.json` and produced the expected output. Single-voice cost at `--dur 2`: 32u 147 ms (rtf 0.073, cpu 7.4%), 128u 739 ms (rtf 0.37, cpu 37%). The ratio is roughly 5x rather than the theoretical 16x because Csound startup and JSON parse are a much larger share of wall time at this duration. The full benchmark uses `--dur 10`, dropping startup to about 5% of wall time. Numbers from the smoke test are sanity-check only, not the final figure.
+
+---
+
+## rkmoog opcode: RKSimulationMoog as a Csound plugin
+
+### Motivation
+
+The existing `bench_dsp.cpp` standalone binary benchmarks `RKSimulationMoog` (RK4, 8x oversampled) outside Csound. That gives a DSP-only floor but includes no opcode dispatch overhead, no Csound scheduler cost, and no MYFLT double-to-float conversion. To get a true apples-to-apples comparison with moognn -- same audio path, same Csound frame dispatch, same k-rate cutoff update -- `RKSimulationMoog` needed its own opcode.
+
+### Implementation
+
+`src/csound_opcode/rkmoog.cpp` wraps `RKSimulationMoog` in a `csnd::Plugin<1, 3>` struct. Signature: `aout rkmoog ain, kcutoff, kresonance`.
+
+Design choices:
+- `init()` allocates one `RKSimulationMoog` on the heap (sample rate from `sr()`, which reads `insdshead->esr`).
+- `aperf()` converts the ksmps block from `MYFLT` (double in Csound 7) to `float`, calls `Process()`, converts back. A `std::vector<float>` scratch buffer avoids per-sample heap alloc.
+- `SetCutoff`/`SetResonance` are only called when the k-rate value actually changes (both multiply by 2*pi internally, so skipping unchanged calls matters under high polyphony).
+- No preload opcode, no JSON, no fade-in. State lives in `RKSimulationMoog::state[4]` and resets to zero on init.
+
+### Bug: nsmps uninitialized in init()
+
+First run crashed with SIGSEGV. The scratch buffer was sized with `nsmps` in `init()`, but the CPOF framework does not set the Plugin's `nsmps` member until `aperf()` fires (via `nsmps_set()`). During `init()`, `nsmps` is uninitialised (zero from Csound's malloc), so `scratch.resize(0)` produced an empty vector. The first `scratch[i]` write in `aperf()` was an out-of-bounds access.
+
+Fix: size the scratch buffer with `insdshead->ksmps` instead, which is valid at init time:
+
+```cpp
+scratch.resize(insdshead->ksmps);
+```
+
+### CMake and bench harness updates
+
+- `rkmoog` added to `CMakeLists.txt` as a shared library; includes `vendor/MoogLadders/src` (no RTNeural dependency).
+- `bench/bench_opcode.csd`: added `--opcode-lib=build/bin/Release/rkmoog.dll`, updated INSTR comment (4=rkmoog), added instr 4 with same log sweep and resonance=0.5 as the training data.
+- `bench/run_benchmarks.py`: added rkmoog polyphony sweep (voices 1, 2, 4, 8, 16) to the matrix.
+- `bench/plot_results.py`: `rkmoog` added to `META`, `POLYPHONY_ORDER`, frontier dotted lines, and headline table.
+
+### Smoke test (--dur 2, 2 trials, Ryzen 5600X)
+
+| Voices | CPU% | Voices at realtime |
+|--------|------|--------------------|
+| 1      | 4.0  | 25                 |
+| 2      | 6.7  | 29                 |
+| 4      | 16.6 | 24                 |
+| 8      | 30.8 | 25                 |
+| 16     | 57.0 | 28                 |
+
+~4% CPU/voice, ~25 voices at realtime on the 5600X. This is expected to be substantially cheaper than moognn_128u (~37% CPU/voice from the same smoke test), confirming that the neural model carries real inference cost over the physics reference. Final numbers will come from the full `--dur 10` run with the machine idle.
