@@ -29,10 +29,10 @@ import pandas as pd
 # ── Paths to static ESR eval outputs ──────────────────────────────────────────
 
 ESR_FILES = {
-    "moognn_32u":  "models/run_24_32u/evalOutput.txt",
+    "moognn_32u":  "models/25_moog_100-20k_32u/eval/evalOutput.txt",
     "moognn_64u":  "models/16_moog_100-20k_64u_w256/eval/evalOutput.txt",
     "moognn_128u": "models/19_moog_100-20k_128u_w256/eval/evalOutput.txt",
-    "moognn_256u": "models/run_25_256u/evalOutput.txt",
+    "moognn_256u": "models/26_moog_100-20k_256u/eval/evalOutput.txt",
 }
 
 # Display metadata per implementation label

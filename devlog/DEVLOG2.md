@@ -1189,7 +1189,7 @@ Both new runs use the same training config as run 19, varying only `GRU_HIDDEN`.
 2. Write `bench_dsp.cpp`: wrap `RKSimulationModel` from `vendor/MoogLadders/` in a tight per-sample processing loop matching the opcode's interface. Compile as a separate CMake target alongside `moogGen`.
 3. Write `bench_opcode.csd`: parameterised score template using Csound macros for opcode name, weights path, polyphony count, and duration. Offline render via `-o file.wav`.
 4. Write `bench/run_benchmarks.py`: driver that invokes Csound and the DSP binary via subprocess, times each invocation with `time.perf_counter()`, appends to `bench/results/raw.csv`.
-5. Train moognn at 32 and 256 units (`models/run_24_32u/`, `models/run_25_256u/` or equivalent). Evaluate ESR on standard cutoffs.
+5. Train moognn at 32 and 256 units (`models/25_moog_100-20k_32u/`, `models/26_moog_100-20k_256u/` or equivalent). Evaluate ESR on standard cutoffs.
 6. Run the full measurement matrix.
 7. Write `bench/plot_results.py`: read `raw.csv`, generate `cost_frontier.png` (moognn at four sizes plus DSP baseline) and `headline_table.md`.
 8. Extract the jitter sentence from the per-block timing log.
@@ -1262,7 +1262,7 @@ Revised framing for the paper:
 
 ## Frontier point: run 24 (32u moognn)
 
-Trained for the CPU vs. accuracy frontier. Same config as run 19, only `GRU_HIDDEN=32`. Eval at [models/run_24_32u/evalOutput.txt](../models/run_24_32u/evalOutput.txt).
+Trained for the CPU vs. accuracy frontier. Same config as run 19, only `GRU_HIDDEN=32`. Eval at [models/25_moog_100-20k_32u/eval/evalOutput.txt](../models/25_moog_100-20k_32u/eval/evalOutput.txt).
 
 | Freq (Hz) | 32u (run 24) | 64u (run 16) | 128u (run 19) |
 |-----------|--------------|--------------|---------------|
@@ -1306,10 +1306,10 @@ Parsed from static bench eval outputs:
 
 | Label | Mean ESR (dB) | Eval file |
 |-------|---------------|-----------|
-| moognn_32u | -39.6 | [models/run_24_32u/evalOutput.txt](../models/run_24_32u/evalOutput.txt) |
+| moognn_32u | -39.6 | [models/25_moog_100-20k_32u/eval/evalOutput.txt](../models/25_moog_100-20k_32u/eval/evalOutput.txt) |
 | moognn_64u | -42.3 | [models/16_moog_100-20k_64u_w256/eval/evalOutput.txt](../models/16_moog_100-20k_64u_w256/eval/evalOutput.txt) |
 | moognn_128u | -45.9 | [models/19_moog_100-20k_128u_w256/eval/evalOutput.txt](../models/19_moog_100-20k_128u_w256/eval/evalOutput.txt) |
-| moognn_256u | pending | models/run_25_256u/evalOutput.txt |
+| moognn_256u | pending | models/26_moog_100-20k_256u/eval/evalOutput.txt |
 
 ### Remaining steps
 

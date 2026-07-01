@@ -74,7 +74,7 @@ Key flags:
 ### Opcode benchmarks (moognn, distnn, moogladder)
 
 Run when the machine is idle and no training is in progress. The 256u model
-must be trained first (`models/run_25_256u/weights.json` must exist) or pass
+must be trained first (`models/26_moog_100-20k_256u/weights.json` must exist) or pass
 `--no-256u` to skip it.
 
 ```bash

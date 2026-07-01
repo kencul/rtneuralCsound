@@ -238,10 +238,10 @@ Opcode signature: `aout moognn{N} ain, Spath, kcutoff`
 
 | Opcode | GRU units | Example model |
 |--------|-----------|---------------|
-| `moognn32`  | 32  | `models/run_24_32u/weights.json` |
+| `moognn32`  | 32  | `models/25_moog_100-20k_32u/weights.json` |
 | `moognn64`  | 64  | `models/16_moog_100-20k_64u_w256/weights.json` |
 | `moognn128` | 128 | `models/19_moog_100-20k_128u_w256/weights.json` (deployed) |
-| `moognn256` | 256 | `models/run_25_256u/weights.json` (training) |
+| `moognn256` | 256 | `models/26_moog_100-20k_256u/weights.json` (training) |
 
 Arguments:
 - `ain`: audio input
