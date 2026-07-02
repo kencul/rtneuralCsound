@@ -1413,3 +1413,44 @@ scratch.resize(insdshead->ksmps);
 | 16     | 57.0 | 28                 |
 
 ~4% CPU/voice, ~25 voices at realtime on the 5600X. This is expected to be substantially cheaper than moognn_128u (~37% CPU/voice from the same smoke test), confirming that the neural model carries real inference cost over the physics reference. Final numbers will come from the full `--dur 10` run with the machine idle.
+
+
+## New training data and dist_10 (breadboard recordings)
+
+### Recording setup
+
+New distortion recordings made with a physical loopback: dry signal sent from the interface output through the pedal and back into the input simultaneously, so the dry reference captures exactly what entered the hardware. Files saved to `audio/updatedDistortion/`:
+
+| File | Role |
+|------|------|
+| `trainingDry.wav` / `trainingWet.wav` | Training pair (breadboard, 0 dB) |
+| `training-10dBDry.wav` / `training-10dBWet.wav` | Training pair (breadboard, -10 dB) |
+| `benchDry.wav` / `benchWet.wav` | Held-out eval (bench rig, 0 dB) |
+| `bench-10dBDry.wav` / `bench-10dBWet.wav` | Held-out eval (bench rig, -10 dB) |
+
+Alignment check on all four pairs: +-1-2 samples at 48 kHz (expected ADC/DAC offset, not corrected). Compared to the GigaTestAudio recordings, the audio was also volume-normalized for more consistent levels throughout. This means the distortion circuit sees less input-level variation across the recording, which may reduce the dynamic range of behaviour the model needs to learn.
+
+An earlier export had a long tail of silence on each file. This inflated window counts and produced artificially good ESR: during silence the wet is near-zero except for low-frequency breadboard hum, which the model trivially ignores, flattering the metric without reflecting actual distortion accuracy. Files were re-exported with the silence trimmed.
+
+### Training configuration
+
+Identical to dist_07_mrstft: 128 GRU units, MR-STFT + L1 loss, window_size 8192, warmup 256, batch 64, LR 3e-4, clip 0.5, patience 40. Val split is 20% random window shuffle within the breadboard training pairs only; held-out bench is never seen during training. Training script updated to accept GRU hidden size as an optional second CLI argument.
+
+### Results: dist_10_gru128
+
+28 minutes, 300 epochs (no early stop). Best val_loss: 0.3144.
+
+| Pair | Split | ESR (dB) |
+|------|-------|----------|
+| bench | held-out | -5.3 |
+| bench-10dB | held-out | -3.2 |
+| training | train | -6.9 |
+| training-10dB | train | -4.5 |
+
+ASR mean: -42.1 dB (dist_07: -42.7 dB). Aliasing is not a factor.
+
+### Analysis
+
+dist_10 closes the bench gap that plagued dist_07 through dist_09. dist_07 scored +1.1 dB ESR on held-out bench (positive ESR means the error exceeds the signal energy, i.e. the model is worse than silence). dist_10 scores -5.3 dB, indicating real learning on the held-out set. The train-to-held-out gap is also much smaller: dist_07 was -15 dB in-distribution vs +1.1 dB on bench; dist_10 is -6.9 dB in-distribution vs -5.3 dB on bench. The new recordings come from the same physical loopback session and are volume-normalized, so training and eval data share more spectral and dynamic properties than GigaTestAudio and bench did.
+
+In-distribution training ESR (-6.9 dB) is weaker than dist_07's (-15 dB) despite identical architecture and loss. The breadboard circuit has more low-frequency noise and component variation than the bench rig, which adds irreducible noise to every training target. The volume normalization, while it reduced distribution mismatch, also compressed the dynamic range seen by the circuit, potentially limiting what the model learns about the circuit's nonlinear behaviour at different drive levels.

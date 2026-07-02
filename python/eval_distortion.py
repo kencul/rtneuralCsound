@@ -52,10 +52,10 @@ WARMUP_SIZE = 256
 
 # (label, dry, wet, split)
 EVAL_PAIRS = [
-    ("bench",       "audio/distortionBench.wav",              "audio/distortionOutput/distortionBenchOutput.wav",         "held-out"),
-    ("bench-10dB",  "audio/distortionBench-10dB.wav",         "audio/distortionOutput/distortionBenchOutput-10dB.wav",    "held-out"),
-    ("giga",        "audio/distortionGigaTestAudio.wav",       "audio/distortionOutput/distortionGigaTestOutput.wav",      "train"),
-    ("giga-10dB",   "audio/distortionGigaTestAudio-10dB.wav",  "audio/distortionOutput/distortionGigaTestOutput-10dB.wav", "train"),
+    ("bench",        "audio/updatedDistortion/benchDry.wav",        "audio/updatedDistortion/benchWet.wav",        "held-out"),
+    ("bench-10dB",   "audio/updatedDistortion/bench-10dBDry.wav",   "audio/updatedDistortion/bench-10dBWet.wav",   "held-out"),
+    ("training",     "audio/updatedDistortion/trainingDry.wav",     "audio/updatedDistortion/trainingWet.wav",     "train"),
+    ("training-10dB","audio/updatedDistortion/training-10dBDry.wav","audio/updatedDistortion/training-10dBWet.wav","train"),
 ]
 
 

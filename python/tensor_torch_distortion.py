@@ -11,9 +11,9 @@ from json import JSONEncoder
 from model_distortion import Model
 from torch.utils.data import DataLoader, TensorDataset
 
-if len(sys.argv) != 2:
-    print(f"Usage: {sys.argv[0]} <output_dir>")
-    print(f"  e.g. {sys.argv[0]} models/dist_05_gru128")
+if len(sys.argv) < 2 or len(sys.argv) > 3:
+    print(f"Usage: {sys.argv[0]} <output_dir> [gru_hidden]")
+    print(f"  e.g. {sys.argv[0]} models/dist_10_gru128 128")
     sys.exit(1)
 
 OUT_DIR = sys.argv[1]
@@ -33,16 +33,16 @@ _log = open(os.path.join(OUT_DIR, "training.log"), "w")
 sys.stdout = _Tee(sys.__stdout__, _log)
 sys.stderr = _Tee(sys.__stderr__, _log)
 
-GRU_HIDDEN  = 128
+GRU_HIDDEN  = int(sys.argv[2]) if len(sys.argv) == 3 else 128
 CELL        = 'gru'
-window_size = 32768
+window_size = 8192
 warmup_size = 256
 VAL_FRAC    = 0.2
 SEED        = 42
 
 PAIRS = [
-    ("audio/distortionGigaTestAudio.wav",       "audio/distortionOutput/distortionGigaTestOutput.wav"),
-    ("audio/distortionGigaTestAudio-10dB.wav",  "audio/distortionOutput/distortionGigaTestOutput-10dB.wav"),
+    ("audio/updatedDistortion/trainingDry.wav",    "audio/updatedDistortion/trainingWet.wav"),
+    ("audio/updatedDistortion/training-10dBDry.wav", "audio/updatedDistortion/training-10dBWet.wav"),
 ]
 
 
@@ -104,7 +104,7 @@ Y_train = torch.tensor(Y_train, dtype=torch.float32).to(device)
 X_val   = torch.tensor(X_val,   dtype=torch.float32).to(device)
 Y_val   = torch.tensor(Y_val,   dtype=torch.float32).to(device)
 
-train_loader = DataLoader(TensorDataset(X_train, Y_train), batch_size=32, shuffle=True)
+train_loader = DataLoader(TensorDataset(X_train, Y_train), batch_size=64, shuffle=True)
 
 model     = Model(gru_hidden=GRU_HIDDEN, cell=CELL).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
