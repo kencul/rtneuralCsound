@@ -1,0 +1,14 @@
+model: models/dist_10_gru128_v2/best_model.pt
+cell:  GRU 128u
+test:  sine amp=0.5 duration=4.0s sr=48000
+fft:   nperseg=32768 harm_tol=3 bins low_cut=30.0 Hz
+
+Test freq (Hz)     ASR (dB)
+----------------------------
+500                   -43.4
+1000                  -43.5
+2000                  -43.4
+4000                  -42.4
+8000                  -42.2
+----------------------------
+mean                  -43.0

@@ -1453,4 +1453,18 @@ ASR mean: -42.1 dB (dist_07: -42.7 dB). Aliasing is not a factor.
 
 dist_10 closes the bench gap that plagued dist_07 through dist_09. dist_07 scored +1.1 dB ESR on held-out bench (positive ESR means the error exceeds the signal energy, i.e. the model is worse than silence). dist_10 scores -5.3 dB, indicating real learning on the held-out set. The train-to-held-out gap is also much smaller: dist_07 was -15 dB in-distribution vs +1.1 dB on bench; dist_10 is -6.9 dB in-distribution vs -5.3 dB on bench. The new recordings come from the same physical loopback session and are volume-normalized, so training and eval data share more spectral and dynamic properties than GigaTestAudio and bench did.
 
-In-distribution training ESR (-6.9 dB) is weaker than dist_07's (-15 dB) despite identical architecture and loss. The breadboard circuit has more low-frequency noise and component variation than the bench rig, which adds irreducible noise to every training target. The volume normalization, while it reduced distribution mismatch, also compressed the dynamic range seen by the circuit, potentially limiting what the model learns about the circuit's nonlinear behaviour at different drive levels.
+In-distribution training ESR (-6.9 dB) is weaker than dist_07's (-15 dB) despite identical architecture and loss. The breadboard circuit has more low-frequency noise and component variation than the bench rig, adding irreducible noise to every training target. Volume normalization reduced distribution mismatch but also compressed the amplitude range seen by the circuit, potentially limiting what the model learns about nonlinear behaviour at different drive levels.
+
+## dist_11_gru64 and 128u size comparison
+
+Trained dist_11 at 64 GRU units on the same breadboard data and config as dist_10. Also retrained 128u (dist_10_gru128_v2) to check whether dist_10's poor result was a bad random initialization.
+
+| Model | GRU | train ESR | bench ESR (held-out) | ASR mean |
+|-------|-----|-----------|----------------------|----------|
+| dist_10_gru128 | 128 | -6.9 | -5.3 | -42.1 |
+| dist_10_gru128_v2 | 128 | -5.9 | -4.6 | -43.0 |
+| dist_11_gru64 | 64 | -22.7 | -25.7 | -41.6 |
+
+The v2 rerun reproduced the poor 128u result, ruling out a bad initialization. 64u outperforms 128u by roughly 20 dB on both training and held-out bench despite using half the capacity. The most likely explanation is that the larger model overfit to minimizing MR-STFT magnitude loss without tracking the waveform, since spectral loss can be satisfied by outputs that match frequency content but not sample-level alignment. The smaller model's lower capacity acts as implicit regularization that prevents this shortcut.
+
+dist_11_gru64 is the primary distortion model going forward. dist_10_gru128_v2 is discarded. The distnn opcode will be updated to deploy the 64u weights.
