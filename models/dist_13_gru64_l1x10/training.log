@@ -1,0 +1,312 @@
+Config: GRU_HIDDEN=64 CELL=gru L1_WEIGHT=10.0 LR=0.0001 CLIP=0.3
+Loading training data...
+  trainingDry.wav: 4875 train, 1218 val windows
+  training-10dBDry.wav: 4875 train, 1218 val windows
+Total: 9750 train, 2436 val windows  sr=48000
+Using device: cuda
+Optimizer: lr=0.0001 clip=0.3
+Epoch 1/300 - loss: 2.8693 (mae 0.0765 mrstft 2.1045) - val: 2.7659 (mae 0.0679 mrstft 2.0867) - lr: 1.00e-04 - 5.8s
+Epoch 2/300 - loss: 2.7255 (mae 0.0662 mrstft 2.0632) - val: 2.6573 (mae 0.0616 mrstft 2.0409) - lr: 1.00e-04 - 4.9s
+Epoch 3/300 - loss: 2.6103 (mae 0.0602 mrstft 2.0086) - val: 2.5320 (mae 0.0556 mrstft 1.9756) - lr: 1.00e-04 - 4.9s
+Epoch 4/300 - loss: 2.4817 (mae 0.0546 mrstft 1.9353) - val: 2.4170 (mae 0.0520 mrstft 1.8973) - lr: 1.00e-04 - 4.8s
+Epoch 5/300 - loss: 2.3730 (mae 0.0518 mrstft 1.8546) - val: 2.3153 (mae 0.0501 mrstft 1.8144) - lr: 1.00e-04 - 4.9s
+Epoch 6/300 - loss: 2.2805 (mae 0.0510 mrstft 1.7707) - val: 2.2175 (mae 0.0499 mrstft 1.7184) - lr: 1.00e-04 - 4.9s
+Epoch 7/300 - loss: 2.1863 (mae 0.0517 mrstft 1.6694) - val: 2.1351 (mae 0.0511 mrstft 1.6238) - lr: 1.00e-04 - 4.9s
+Epoch 8/300 - loss: 2.1173 (mae 0.0530 mrstft 1.5872) - val: 2.0777 (mae 0.0524 mrstft 1.5532) - lr: 1.00e-04 - 4.9s
+Epoch 9/300 - loss: 2.0693 (mae 0.0541 mrstft 1.5285) - val: 2.0299 (mae 0.0533 mrstft 1.4970) - lr: 1.00e-04 - 4.9s
+Epoch 10/300 - loss: 2.0367 (mae 0.0552 mrstft 1.4843) - val: 2.0086 (mae 0.0543 mrstft 1.4653) - lr: 1.00e-04 - 5.0s
+Epoch 11/300 - loss: 2.0088 (mae 0.0561 mrstft 1.4477) - val: 1.9729 (mae 0.0551 mrstft 1.4218) - lr: 1.00e-04 - 4.9s
+Epoch 12/300 - loss: 1.9799 (mae 0.0570 mrstft 1.4094) - val: 1.9490 (mae 0.0560 mrstft 1.3890) - lr: 1.00e-04 - 4.9s
+Epoch 13/300 - loss: 1.9605 (mae 0.0580 mrstft 1.3804) - val: 1.9348 (mae 0.0571 mrstft 1.3638) - lr: 1.00e-04 - 4.8s
+Epoch 14/300 - loss: 1.9385 (mae 0.0587 mrstft 1.3516) - val: 1.9224 (mae 0.0575 mrstft 1.3475) - lr: 1.00e-04 - 4.9s
+Epoch 15/300 - loss: 1.9243 (mae 0.0593 mrstft 1.3313) - val: 1.8965 (mae 0.0579 mrstft 1.3173) - lr: 1.00e-04 - 4.9s
+Epoch 16/300 - loss: 1.9097 (mae 0.0597 mrstft 1.3125) - val: 1.8932 (mae 0.0591 mrstft 1.3023) - lr: 1.00e-04 - 4.8s
+Epoch 17/300 - loss: 1.9016 (mae 0.0608 mrstft 1.2938) - val: 1.8803 (mae 0.0591 mrstft 1.2888) - lr: 1.00e-04 - 4.8s
+Epoch 18/300 - loss: 1.8942 (mae 0.0611 mrstft 1.2837) - val: 1.8720 (mae 0.0592 mrstft 1.2801) - lr: 1.00e-04 - 4.8s
+Epoch 19/300 - loss: 1.8878 (mae 0.0614 mrstft 1.2733) - val: 1.8630 (mae 0.0597 mrstft 1.2662) - lr: 1.00e-04 - 4.9s
+Epoch 20/300 - loss: 1.8810 (mae 0.0615 mrstft 1.2664) - val: 1.8570 (mae 0.0597 mrstft 1.2601) - lr: 1.00e-04 - 4.9s
+Epoch 21/300 - loss: 1.8769 (mae 0.0617 mrstft 1.2596) - val: 1.8506 (mae 0.0598 mrstft 1.2527) - lr: 1.00e-04 - 4.9s
+Epoch 22/300 - loss: 1.8724 (mae 0.0621 mrstft 1.2514) - val: 1.8582 (mae 0.0607 mrstft 1.2512) - lr: 1.00e-04 - 4.8s
+Epoch 23/300 - loss: 1.8677 (mae 0.0621 mrstft 1.2466) - val: 1.8430 (mae 0.0600 mrstft 1.2426) - lr: 1.00e-04 - 4.9s
+Epoch 24/300 - loss: 1.8617 (mae 0.0619 mrstft 1.2430) - val: 1.8390 (mae 0.0601 mrstft 1.2379) - lr: 1.00e-04 - 4.9s
+Epoch 25/300 - loss: 1.8552 (mae 0.0619 mrstft 1.2364) - val: 1.8332 (mae 0.0599 mrstft 1.2340) - lr: 1.00e-04 - 4.9s
+Epoch 26/300 - loss: 1.8487 (mae 0.0617 mrstft 1.2313) - val: 1.8453 (mae 0.0615 mrstft 1.2301) - lr: 1.00e-04 - 4.9s
+Epoch 27/300 - loss: 1.8373 (mae 0.0614 mrstft 1.2237) - val: 1.8096 (mae 0.0594 mrstft 1.2151) - lr: 1.00e-04 - 4.8s
+Epoch 28/300 - loss: 1.8260 (mae 0.0614 mrstft 1.2120) - val: 1.7976 (mae 0.0594 mrstft 1.2031) - lr: 1.00e-04 - 4.9s
+Epoch 29/300 - loss: 1.8040 (mae 0.0610 mrstft 1.1936) - val: 1.7753 (mae 0.0596 mrstft 1.1788) - lr: 1.00e-04 - 4.9s
+Epoch 30/300 - loss: 1.7773 (mae 0.0611 mrstft 1.1665) - val: 1.7452 (mae 0.0585 mrstft 1.1606) - lr: 1.00e-04 - 4.9s
+Epoch 31/300 - loss: 1.7267 (mae 0.0593 mrstft 1.1334) - val: 1.6799 (mae 0.0567 mrstft 1.1131) - lr: 1.00e-04 - 4.8s
+Epoch 32/300 - loss: 1.6665 (mae 0.0577 mrstft 1.0890) - val: 1.6329 (mae 0.0557 mrstft 1.0757) - lr: 1.00e-04 - 4.9s
+Epoch 33/300 - loss: 1.5858 (mae 0.0554 mrstft 1.0318) - val: 1.5282 (mae 0.0529 mrstft 0.9988) - lr: 1.00e-04 - 4.9s
+Epoch 34/300 - loss: 1.4937 (mae 0.0525 mrstft 0.9685) - val: 1.4279 (mae 0.0490 mrstft 0.9378) - lr: 1.00e-04 - 4.9s
+Epoch 35/300 - loss: 1.4055 (mae 0.0496 mrstft 0.9096) - val: 1.3637 (mae 0.0473 mrstft 0.8912) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 36/300 - loss: 1.3387 (mae 0.0477 mrstft 0.8616) - val: 1.3165 (mae 0.0457 mrstft 0.8597) - lr: 1.00e-04 - 4.8s - skipped 2
+Epoch 37/300 - loss: 1.2941 (mae 0.0463 mrstft 0.8313) - val: 1.2799 (mae 0.0444 mrstft 0.8358) - lr: 1.00e-04 - 4.9s - skipped 2
+Epoch 38/300 - loss: 1.2749 (mae 0.0453 mrstft 0.8220) - val: 1.2625 (mae 0.0434 mrstft 0.8287) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 39/300 - loss: 1.2269 (mae 0.0429 mrstft 0.7979) - val: 1.2489 (mae 0.0422 mrstft 0.8268) - lr: 1.00e-04 - 4.9s - skipped 4
+Epoch 40/300 - loss: 1.2078 (mae 0.0422 mrstft 0.7854) - val: 1.2304 (mae 0.0417 mrstft 0.8136) - lr: 1.00e-04 - 4.8s - skipped 5
+Epoch 41/300 - loss: 1.1721 (mae 0.0405 mrstft 0.7671) - val: 1.2221 (mae 0.0412 mrstft 0.8098) - lr: 1.00e-04 - 4.9s - skipped 7
+Epoch 42/300 - loss: 1.1480 (mae 0.0395 mrstft 0.7531) - val: 1.2093 (mae 0.0402 mrstft 0.8078) - lr: 1.00e-04 - 4.9s - skipped 9
+Epoch 43/300 - loss: 1.1723 (mae 0.0404 mrstft 0.7686) - val: 1.1999 (mae 0.0401 mrstft 0.7989) - lr: 1.00e-04 - 4.9s - skipped 5
+Epoch 44/300 - loss: 1.1842 (mae 0.0405 mrstft 0.7793) - val: 1.1830 (mae 0.0390 mrstft 0.7926) - lr: 1.00e-04 - 4.8s - skipped 2
+Epoch 45/300 - loss: 1.1524 (mae 0.0393 mrstft 0.7592) - val: 1.1803 (mae 0.0395 mrstft 0.7856) - lr: 1.00e-04 - 4.8s - skipped 5
+Epoch 46/300 - loss: 1.1428 (mae 0.0389 mrstft 0.7537) - val: 1.1621 (mae 0.0382 mrstft 0.7802) - lr: 1.00e-04 - 4.9s - skipped 5
+Epoch 47/300 - loss: 1.1343 (mae 0.0385 mrstft 0.7494) - val: 1.1527 (mae 0.0379 mrstft 0.7741) - lr: 1.00e-04 - 4.9s - skipped 5
+Epoch 48/300 - loss: 1.1422 (mae 0.0388 mrstft 0.7545) - val: 1.1515 (mae 0.0377 mrstft 0.7747) - lr: 1.00e-04 - 4.9s - skipped 3
+Epoch 49/300 - loss: 1.1314 (mae 0.0385 mrstft 0.7466) - val: 1.1486 (mae 0.0376 mrstft 0.7729) - lr: 1.00e-04 - 4.8s - skipped 4
+Epoch 50/300 - loss: 1.1063 (mae 0.0374 mrstft 0.7323) - val: 1.1399 (mae 0.0372 mrstft 0.7684) - lr: 1.00e-04 - 4.9s - skipped 6
+Epoch 51/300 - loss: 1.1022 (mae 0.0372 mrstft 0.7303) - val: 1.1342 (mae 0.0371 mrstft 0.7634) - lr: 1.00e-04 - 4.9s - skipped 6
+Epoch 52/300 - loss: 1.0854 (mae 0.0363 mrstft 0.7220) - val: 1.1408 (mae 0.0377 mrstft 0.7643) - lr: 1.00e-04 - 4.9s - skipped 7
+Epoch 53/300 - loss: 1.1103 (mae 0.0374 mrstft 0.7365) - val: 1.1245 (mae 0.0366 mrstft 0.7584) - lr: 1.00e-04 - 4.8s - skipped 4
+Epoch 54/300 - loss: 1.1034 (mae 0.0370 mrstft 0.7336) - val: 1.1216 (mae 0.0366 mrstft 0.7551) - lr: 1.00e-04 - 4.8s - skipped 4
+Epoch 55/300 - loss: 1.1050 (mae 0.0369 mrstft 0.7359) - val: 1.1077 (mae 0.0356 mrstft 0.7514) - lr: 1.00e-04 - 4.9s - skipped 3
+Epoch 56/300 - loss: 1.0864 (mae 0.0363 mrstft 0.7236) - val: 1.1260 (mae 0.0374 mrstft 0.7515) - lr: 1.00e-04 - 4.9s - skipped 5
+Epoch 57/300 - loss: 1.1025 (mae 0.0369 mrstft 0.7332) - val: 1.1023 (mae 0.0354 mrstft 0.7483) - lr: 1.00e-04 - 4.9s - skipped 3
+Epoch 58/300 - loss: 1.0920 (mae 0.0362 mrstft 0.7303) - val: 1.0978 (mae 0.0352 mrstft 0.7456) - lr: 1.00e-04 - 4.9s - skipped 3
+Epoch 59/300 - loss: 1.0810 (mae 0.0358 mrstft 0.7232) - val: 1.1340 (mae 0.0382 mrstft 0.7522) - lr: 1.00e-04 - 4.9s - skipped 4
+Epoch 60/300 - loss: 1.0662 (mae 0.0353 mrstft 0.7130) - val: 1.0952 (mae 0.0354 mrstft 0.7415) - lr: 1.00e-04 - 4.9s - skipped 6
+Epoch 61/300 - loss: 1.0572 (mae 0.0351 mrstft 0.7064) - val: 1.0865 (mae 0.0345 mrstft 0.7418) - lr: 1.00e-04 - 4.9s - skipped 7
+Epoch 62/300 - loss: 1.0252 (mae 0.0337 mrstft 0.6882) - val: 1.1007 (mae 0.0356 mrstft 0.7446) - lr: 1.00e-04 - 5.1s - skipped 11
+Epoch 63/300 - loss: 1.0178 (mae 0.0333 mrstft 0.6845) - val: 1.0830 (mae 0.0342 mrstft 0.7411) - lr: 1.00e-04 - 5.0s - skipped 11
+Epoch 64/300 - loss: 0.9973 (mae 0.0324 mrstft 0.6729) - val: 1.0905 (mae 0.0349 mrstft 0.7417) - lr: 1.00e-04 - 5.0s - skipped 13
+Epoch 65/300 - loss: 1.0353 (mae 0.0338 mrstft 0.6974) - val: 1.0764 (mae 0.0338 mrstft 0.7386) - lr: 1.00e-04 - 6.8s - skipped 8
+Epoch 66/300 - loss: 1.0315 (mae 0.0336 mrstft 0.6953) - val: 1.0683 (mae 0.0336 mrstft 0.7321) - lr: 1.00e-04 - 5.1s - skipped 8
+Epoch 67/300 - loss: 1.0100 (mae 0.0329 mrstft 0.6814) - val: 1.0644 (mae 0.0332 mrstft 0.7319) - lr: 1.00e-04 - 5.0s - skipped 10
+Epoch 68/300 - loss: 1.0099 (mae 0.0325 mrstft 0.6847) - val: 1.0605 (mae 0.0331 mrstft 0.7299) - lr: 1.00e-04 - 4.9s - skipped 9
+Epoch 69/300 - loss: 1.0081 (mae 0.0326 mrstft 0.6823) - val: 1.0833 (mae 0.0353 mrstft 0.7306) - lr: 1.00e-04 - 4.9s - skipped 9
+Epoch 70/300 - loss: 0.9874 (mae 0.0318 mrstft 0.6692) - val: 1.0513 (mae 0.0326 mrstft 0.7252) - lr: 1.00e-04 - 4.9s - skipped 11
+Epoch 71/300 - loss: 0.9789 (mae 0.0316 mrstft 0.6625) - val: 1.0550 (mae 0.0330 mrstft 0.7255) - lr: 1.00e-04 - 4.9s - skipped 12
+Epoch 72/300 - loss: 0.9722 (mae 0.0311 mrstft 0.6611) - val: 1.0481 (mae 0.0325 mrstft 0.7230) - lr: 1.00e-04 - 4.8s - skipped 12
+Epoch 73/300 - loss: 0.9881 (mae 0.0318 mrstft 0.6697) - val: 1.0389 (mae 0.0321 mrstft 0.7176) - lr: 1.00e-04 - 4.9s - skipped 10
+Epoch 74/300 - loss: 0.9769 (mae 0.0312 mrstft 0.6646) - val: 1.0386 (mae 0.0324 mrstft 0.7149) - lr: 1.00e-04 - 4.9s - skipped 10
+Epoch 75/300 - loss: 0.9810 (mae 0.0314 mrstft 0.6673) - val: 1.0370 (mae 0.0325 mrstft 0.7124) - lr: 1.00e-04 - 4.9s - skipped 9
+Epoch 76/300 - loss: 0.9459 (mae 0.0301 mrstft 0.6445) - val: 1.0293 (mae 0.0320 mrstft 0.7092) - lr: 1.00e-04 - 4.9s - skipped 13
+Epoch 77/300 - loss: 0.9622 (mae 0.0305 mrstft 0.6570) - val: 1.0215 (mae 0.0316 mrstft 0.7055) - lr: 1.00e-04 - 4.8s - skipped 10
+Epoch 78/300 - loss: 0.9403 (mae 0.0296 mrstft 0.6439) - val: 1.0140 (mae 0.0309 mrstft 0.7045) - lr: 1.00e-04 - 4.9s - skipped 12
+Epoch 79/300 - loss: 0.9350 (mae 0.0295 mrstft 0.6396) - val: 1.0091 (mae 0.0309 mrstft 0.7001) - lr: 1.00e-04 - 4.9s - skipped 12
+Epoch 80/300 - loss: 0.9268 (mae 0.0292 mrstft 0.6350) - val: 1.0157 (mae 0.0322 mrstft 0.6935) - lr: 1.00e-04 - 4.9s - skipped 12
+Epoch 81/300 - loss: 0.9170 (mae 0.0290 mrstft 0.6271) - val: 0.9891 (mae 0.0301 mrstft 0.6884) - lr: 1.00e-04 - 4.9s - skipped 13
+Epoch 82/300 - loss: 0.9101 (mae 0.0287 mrstft 0.6228) - val: 0.9806 (mae 0.0298 mrstft 0.6826) - lr: 1.00e-04 - 4.9s - skipped 13
+Epoch 83/300 - loss: 0.9295 (mae 0.0294 mrstft 0.6352) - val: 0.9943 (mae 0.0311 mrstft 0.6832) - lr: 1.00e-04 - 4.9s - skipped 9
+Epoch 84/300 - loss: 0.9205 (mae 0.0290 mrstft 0.6302) - val: 0.9746 (mae 0.0302 mrstft 0.6727) - lr: 1.00e-04 - 4.9s - skipped 9
+Epoch 85/300 - loss: 0.9344 (mae 0.0295 mrstft 0.6398) - val: 0.9543 (mae 0.0293 mrstft 0.6613) - lr: 1.00e-04 - 4.9s - skipped 6
+Epoch 86/300 - loss: 0.9339 (mae 0.0297 mrstft 0.6374) - val: 0.9644 (mae 0.0302 mrstft 0.6623) - lr: 1.00e-04 - 4.9s - skipped 5
+Epoch 87/300 - loss: 0.9147 (mae 0.0288 mrstft 0.6270) - val: 0.9552 (mae 0.0292 mrstft 0.6629) - lr: 1.00e-04 - 4.9s - skipped 6
+Epoch 88/300 - loss: 0.9095 (mae 0.0286 mrstft 0.6233) - val: 0.9330 (mae 0.0285 mrstft 0.6475) - lr: 1.00e-04 - 4.9s - skipped 6
+Epoch 89/300 - loss: 0.9300 (mae 0.0296 mrstft 0.6342) - val: 0.9452 (mae 0.0299 mrstft 0.6458) - lr: 1.00e-04 - 4.9s - skipped 3
+Epoch 90/300 - loss: 0.9311 (mae 0.0297 mrstft 0.6338) - val: 0.9190 (mae 0.0278 mrstft 0.6412) - lr: 1.00e-04 - 4.9s - skipped 2
+Epoch 91/300 - loss: 0.9233 (mae 0.0293 mrstft 0.6306) - val: 0.9195 (mae 0.0277 mrstft 0.6428) - lr: 1.00e-04 - 4.9s - skipped 2
+Epoch 92/300 - loss: 0.8994 (mae 0.0280 mrstft 0.6191) - val: 0.9230 (mae 0.0287 mrstft 0.6364) - lr: 1.00e-04 - 4.9s - skipped 4
+Epoch 93/300 - loss: 0.9163 (mae 0.0287 mrstft 0.6289) - val: 0.9098 (mae 0.0278 mrstft 0.6318) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 94/300 - loss: 0.9107 (mae 0.0283 mrstft 0.6276) - val: 0.9102 (mae 0.0282 mrstft 0.6281) - lr: 1.00e-04 - 4.9s
+Epoch 95/300 - loss: 0.9101 (mae 0.0286 mrstft 0.6241) - val: 0.8941 (mae 0.0269 mrstft 0.6252) - lr: 1.00e-04 - 4.8s
+Epoch 96/300 - loss: 0.8956 (mae 0.0280 mrstft 0.6152) - val: 0.8955 (mae 0.0275 mrstft 0.6203) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 97/300 - loss: 0.8888 (mae 0.0276 mrstft 0.6125) - val: 0.8892 (mae 0.0270 mrstft 0.6192) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 98/300 - loss: 0.8908 (mae 0.0276 mrstft 0.6147) - val: 0.8787 (mae 0.0261 mrstft 0.6176) - lr: 1.00e-04 - 4.9s
+Epoch 99/300 - loss: 0.8854 (mae 0.0275 mrstft 0.6101) - val: 0.8683 (mae 0.0259 mrstft 0.6089) - lr: 1.00e-04 - 4.9s
+Epoch 100/300 - loss: 0.8779 (mae 0.0272 mrstft 0.6059) - val: 0.8804 (mae 0.0266 mrstft 0.6146) - lr: 1.00e-04 - 4.8s
+Epoch 101/300 - loss: 0.8740 (mae 0.0271 mrstft 0.6034) - val: 0.8638 (mae 0.0255 mrstft 0.6084) - lr: 1.00e-04 - 5.0s
+Epoch 102/300 - loss: 0.8704 (mae 0.0271 mrstft 0.5991) - val: 0.8631 (mae 0.0261 mrstft 0.6024) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 103/300 - loss: 0.8717 (mae 0.0273 mrstft 0.5990) - val: 0.8702 (mae 0.0269 mrstft 0.6015) - lr: 1.00e-04 - 4.9s
+Epoch 104/300 - loss: 0.8616 (mae 0.0265 mrstft 0.5961) - val: 0.8540 (mae 0.0254 mrstft 0.6000) - lr: 1.00e-04 - 4.8s
+Epoch 105/300 - loss: 0.8611 (mae 0.0266 mrstft 0.5950) - val: 0.8493 (mae 0.0256 mrstft 0.5936) - lr: 1.00e-04 - 4.9s
+Epoch 106/300 - loss: 0.8484 (mae 0.0260 mrstft 0.5884) - val: 0.8404 (mae 0.0246 mrstft 0.5943) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 107/300 - loss: 0.8454 (mae 0.0259 mrstft 0.5866) - val: 0.8421 (mae 0.0248 mrstft 0.5938) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 108/300 - loss: 0.8330 (mae 0.0253 mrstft 0.5800) - val: 0.8404 (mae 0.0245 mrstft 0.5952) - lr: 1.00e-04 - 4.8s - skipped 2
+Epoch 109/300 - loss: 0.8450 (mae 0.0259 mrstft 0.5858) - val: 0.8392 (mae 0.0246 mrstft 0.5928) - lr: 1.00e-04 - 4.8s
+Epoch 110/300 - loss: 0.8391 (mae 0.0256 mrstft 0.5831) - val: 0.8254 (mae 0.0244 mrstft 0.5813) - lr: 1.00e-04 - 4.9s
+Epoch 111/300 - loss: 0.8161 (mae 0.0250 mrstft 0.5661) - val: 0.8155 (mae 0.0239 mrstft 0.5763) - lr: 1.00e-04 - 4.9s - skipped 3
+Epoch 112/300 - loss: 0.8279 (mae 0.0254 mrstft 0.5735) - val: 0.8469 (mae 0.0265 mrstft 0.5820) - lr: 1.00e-04 - 4.9s
+Epoch 113/300 - loss: 0.8184 (mae 0.0249 mrstft 0.5699) - val: 0.8057 (mae 0.0235 mrstft 0.5709) - lr: 1.00e-04 - 4.8s
+Epoch 114/300 - loss: 0.8180 (mae 0.0248 mrstft 0.5696) - val: 0.8087 (mae 0.0236 mrstft 0.5726) - lr: 1.00e-04 - 4.9s
+Epoch 115/300 - loss: 0.8103 (mae 0.0244 mrstft 0.5663) - val: 0.8075 (mae 0.0238 mrstft 0.5698) - lr: 1.00e-04 - 4.9s
+Epoch 116/300 - loss: 0.8056 (mae 0.0243 mrstft 0.5623) - val: 0.7957 (mae 0.0231 mrstft 0.5651) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 117/300 - loss: 0.8055 (mae 0.0244 mrstft 0.5612) - val: 0.7883 (mae 0.0226 mrstft 0.5620) - lr: 1.00e-04 - 4.9s
+Epoch 118/300 - loss: 0.7907 (mae 0.0237 mrstft 0.5540) - val: 0.7824 (mae 0.0225 mrstft 0.5579) - lr: 1.00e-04 - 4.8s - skipped 1
+Epoch 119/300 - loss: 0.7857 (mae 0.0235 mrstft 0.5509) - val: 0.7825 (mae 0.0224 mrstft 0.5584) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 120/300 - loss: 0.7821 (mae 0.0233 mrstft 0.5490) - val: 0.7737 (mae 0.0221 mrstft 0.5524) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 121/300 - loss: 0.7698 (mae 0.0228 mrstft 0.5422) - val: 0.7716 (mae 0.0221 mrstft 0.5508) - lr: 1.00e-04 - 4.9s - skipped 2
+Epoch 122/300 - loss: 0.7690 (mae 0.0228 mrstft 0.5415) - val: 0.7636 (mae 0.0218 mrstft 0.5460) - lr: 1.00e-04 - 4.8s - skipped 1
+Epoch 123/300 - loss: 0.7723 (mae 0.0229 mrstft 0.5432) - val: 0.7568 (mae 0.0215 mrstft 0.5421) - lr: 1.00e-04 - 4.9s
+Epoch 124/300 - loss: 0.7584 (mae 0.0221 mrstft 0.5369) - val: 0.7589 (mae 0.0216 mrstft 0.5426) - lr: 1.00e-04 - 4.9s - skipped 1
+Epoch 125/300 - loss: 0.7681 (mae 0.0228 mrstft 0.5404) - val: 0.7464 (mae 0.0209 mrstft 0.5370) - lr: 1.00e-04 - 4.9s
+Epoch 126/300 - loss: 0.7539 (mae 0.0220 mrstft 0.5340) - val: 0.7597 (mae 0.0219 mrstft 0.5410) - lr: 1.00e-04 - 4.9s
+Epoch 127/300 - loss: 0.7497 (mae 0.0219 mrstft 0.5305) - val: 0.7473 (mae 0.0211 mrstft 0.5362) - lr: 1.00e-04 - 4.8s
+Epoch 128/300 - loss: 0.7453 (mae 0.0217 mrstft 0.5288) - val: 0.7562 (mae 0.0222 mrstft 0.5343) - lr: 1.00e-04 - 5.0s
+Epoch 129/300 - loss: 0.7436 (mae 0.0216 mrstft 0.5272) - val: 0.7289 (mae 0.0202 mrstft 0.5271) - lr: 1.00e-04 - 4.9s
+Epoch 130/300 - loss: 0.7333 (mae 0.0211 mrstft 0.5223) - val: 0.7222 (mae 0.0200 mrstft 0.5226) - lr: 1.00e-04 - 4.9s
+Epoch 131/300 - loss: 0.7314 (mae 0.0210 mrstft 0.5210) - val: 0.7195 (mae 0.0197 mrstft 0.5229) - lr: 1.00e-04 - 4.8s
+Epoch 132/300 - loss: 0.7210 (mae 0.0205 mrstft 0.5161) - val: 0.7093 (mae 0.0194 mrstft 0.5156) - lr: 1.00e-04 - 4.9s
+Epoch 133/300 - loss: 0.7165 (mae 0.0203 mrstft 0.5132) - val: 0.7035 (mae 0.0190 mrstft 0.5131) - lr: 1.00e-04 - 4.9s
+Epoch 134/300 - loss: 0.7106 (mae 0.0200 mrstft 0.5103) - val: 0.7018 (mae 0.0190 mrstft 0.5121) - lr: 1.00e-04 - 4.9s
+Epoch 135/300 - loss: 0.7115 (mae 0.0201 mrstft 0.5108) - val: 0.7135 (mae 0.0197 mrstft 0.5166) - lr: 1.00e-04 - 4.9s
+Epoch 136/300 - loss: 0.7038 (mae 0.0196 mrstft 0.5073) - val: 0.7032 (mae 0.0191 mrstft 0.5119) - lr: 1.00e-04 - 4.8s
+Epoch 137/300 - loss: 0.7010 (mae 0.0196 mrstft 0.5052) - val: 0.7115 (mae 0.0199 mrstft 0.5120) - lr: 1.00e-04 - 4.9s
+Epoch 138/300 - loss: 0.6968 (mae 0.0194 mrstft 0.5024) - val: 0.6837 (mae 0.0180 mrstft 0.5036) - lr: 1.00e-04 - 4.9s
+Epoch 139/300 - loss: 0.6900 (mae 0.0190 mrstft 0.4996) - val: 0.7108 (mae 0.0203 mrstft 0.5078) - lr: 1.00e-04 - 4.9s
+Epoch 140/300 - loss: 0.6873 (mae 0.0189 mrstft 0.4979) - val: 0.6832 (mae 0.0183 mrstft 0.5003) - lr: 1.00e-04 - 4.8s
+Epoch 141/300 - loss: 0.6810 (mae 0.0186 mrstft 0.4946) - val: 0.6769 (mae 0.0181 mrstft 0.4956) - lr: 1.00e-04 - 4.9s
+Epoch 142/300 - loss: 0.6740 (mae 0.0183 mrstft 0.4913) - val: 0.6688 (mae 0.0177 mrstft 0.4920) - lr: 1.00e-04 - 4.9s
+Epoch 143/300 - loss: 0.6715 (mae 0.0182 mrstft 0.4898) - val: 0.6603 (mae 0.0170 mrstft 0.4898) - lr: 1.00e-04 - 4.9s
+Epoch 144/300 - loss: 0.6686 (mae 0.0181 mrstft 0.4876) - val: 0.6748 (mae 0.0178 mrstft 0.4969) - lr: 1.00e-04 - 4.9s
+Epoch 145/300 - loss: 0.6692 (mae 0.0182 mrstft 0.4872) - val: 0.6663 (mae 0.0178 mrstft 0.4881) - lr: 1.00e-04 - 4.8s
+Epoch 146/300 - loss: 0.6599 (mae 0.0177 mrstft 0.4833) - val: 0.6503 (mae 0.0162 mrstft 0.4882) - lr: 1.00e-04 - 4.9s
+Epoch 147/300 - loss: 0.6557 (mae 0.0174 mrstft 0.4816) - val: 0.6461 (mae 0.0162 mrstft 0.4842) - lr: 1.00e-04 - 4.9s
+Epoch 148/300 - loss: 0.6491 (mae 0.0171 mrstft 0.4786) - val: 0.6531 (mae 0.0167 mrstft 0.4862) - lr: 1.00e-04 - 4.9s
+Epoch 149/300 - loss: 0.6461 (mae 0.0169 mrstft 0.4770) - val: 0.6412 (mae 0.0160 mrstft 0.4816) - lr: 1.00e-04 - 4.8s
+Epoch 150/300 - loss: 0.6411 (mae 0.0167 mrstft 0.4738) - val: 0.6379 (mae 0.0160 mrstft 0.4779) - lr: 1.00e-04 - 4.9s
+Epoch 151/300 - loss: 0.6362 (mae 0.0166 mrstft 0.4705) - val: 0.6232 (mae 0.0153 mrstft 0.4705) - lr: 1.00e-04 - 4.9s
+Epoch 152/300 - loss: 0.6324 (mae 0.0164 mrstft 0.4684) - val: 0.6358 (mae 0.0163 mrstft 0.4727) - lr: 1.00e-04 - 4.9s
+Epoch 153/300 - loss: 0.6257 (mae 0.0160 mrstft 0.4653) - val: 0.6175 (mae 0.0151 mrstft 0.4666) - lr: 1.00e-04 - 4.9s
+Epoch 154/300 - loss: 0.6226 (mae 0.0160 mrstft 0.4631) - val: 0.6226 (mae 0.0157 mrstft 0.4660) - lr: 1.00e-04 - 4.8s
+Epoch 155/300 - loss: 0.6204 (mae 0.0158 mrstft 0.4628) - val: 0.6130 (mae 0.0148 mrstft 0.4653) - lr: 1.00e-04 - 4.9s
+Epoch 156/300 - loss: 0.6166 (mae 0.0156 mrstft 0.4608) - val: 0.6195 (mae 0.0153 mrstft 0.4665) - lr: 1.00e-04 - 4.9s
+Epoch 157/300 - loss: 0.6140 (mae 0.0154 mrstft 0.4596) - val: 0.6079 (mae 0.0146 mrstft 0.4616) - lr: 1.00e-04 - 4.8s
+Epoch 158/300 - loss: 0.6086 (mae 0.0152 mrstft 0.4566) - val: 0.5965 (mae 0.0141 mrstft 0.4557) - lr: 1.00e-04 - 4.9s
+Epoch 159/300 - loss: 0.6028 (mae 0.0150 mrstft 0.4532) - val: 0.5936 (mae 0.0140 mrstft 0.4536) - lr: 1.00e-04 - 4.8s
+Epoch 160/300 - loss: 0.6014 (mae 0.0149 mrstft 0.4521) - val: 0.5880 (mae 0.0137 mrstft 0.4510) - lr: 1.00e-04 - 4.9s
+Epoch 161/300 - loss: 0.6021 (mae 0.0151 mrstft 0.4512) - val: 0.5890 (mae 0.0137 mrstft 0.4518) - lr: 1.00e-04 - 4.9s
+Epoch 162/300 - loss: 0.5955 (mae 0.0146 mrstft 0.4497) - val: 0.5892 (mae 0.0135 mrstft 0.4538) - lr: 1.00e-04 - 4.9s
+Epoch 163/300 - loss: 0.5922 (mae 0.0145 mrstft 0.4476) - val: 0.5906 (mae 0.0141 mrstft 0.4493) - lr: 1.00e-04 - 4.8s
+Epoch 164/300 - loss: 0.5924 (mae 0.0146 mrstft 0.4463) - val: 0.5774 (mae 0.0131 mrstft 0.4465) - lr: 1.00e-04 - 4.9s
+Epoch 165/300 - loss: 0.5869 (mae 0.0143 mrstft 0.4442) - val: 0.6089 (mae 0.0156 mrstft 0.4529) - lr: 1.00e-04 - 4.9s
+Epoch 166/300 - loss: 0.5855 (mae 0.0142 mrstft 0.4433) - val: 0.5827 (mae 0.0135 mrstft 0.4476) - lr: 1.00e-04 - 4.9s
+Epoch 167/300 - loss: 0.5760 (mae 0.0137 mrstft 0.4392) - val: 0.5765 (mae 0.0134 mrstft 0.4427) - lr: 1.00e-04 - 4.8s
+Epoch 168/300 - loss: 0.5737 (mae 0.0136 mrstft 0.4376) - val: 0.5658 (mae 0.0126 mrstft 0.4400) - lr: 1.00e-04 - 4.8s
+Epoch 169/300 - loss: 0.5719 (mae 0.0135 mrstft 0.4365) - val: 0.5780 (mae 0.0133 mrstft 0.4446) - lr: 1.00e-04 - 4.9s
+Epoch 170/300 - loss: 0.5691 (mae 0.0135 mrstft 0.4339) - val: 0.5641 (mae 0.0127 mrstft 0.4368) - lr: 1.00e-04 - 4.9s
+Epoch 171/300 - loss: 0.5649 (mae 0.0133 mrstft 0.4319) - val: 0.5562 (mae 0.0123 mrstft 0.4337) - lr: 1.00e-04 - 4.9s
+Epoch 172/300 - loss: 0.5656 (mae 0.0134 mrstft 0.4311) - val: 0.5555 (mae 0.0124 mrstft 0.4312) - lr: 1.00e-04 - 4.8s
+Epoch 173/300 - loss: 0.5590 (mae 0.0131 mrstft 0.4284) - val: 0.5560 (mae 0.0126 mrstft 0.4305) - lr: 1.00e-04 - 4.9s
+Epoch 174/300 - loss: 0.5546 (mae 0.0128 mrstft 0.4265) - val: 0.5453 (mae 0.0118 mrstft 0.4273) - lr: 1.00e-04 - 4.9s
+Epoch 175/300 - loss: 0.5493 (mae 0.0125 mrstft 0.4240) - val: 0.5419 (mae 0.0116 mrstft 0.4255) - lr: 1.00e-04 - 4.9s
+Epoch 176/300 - loss: 0.5458 (mae 0.0124 mrstft 0.4217) - val: 0.5377 (mae 0.0116 mrstft 0.4215) - lr: 1.00e-04 - 4.9s
+Epoch 177/300 - loss: 0.5471 (mae 0.0126 mrstft 0.4209) - val: 0.5441 (mae 0.0119 mrstft 0.4250) - lr: 1.00e-04 - 4.8s
+Epoch 178/300 - loss: 0.5400 (mae 0.0122 mrstft 0.4178) - val: 0.5513 (mae 0.0120 mrstft 0.4309) - lr: 1.00e-04 - 4.9s
+Epoch 179/300 - loss: 0.5364 (mae 0.0121 mrstft 0.4155) - val: 0.5282 (mae 0.0112 mrstft 0.4159) - lr: 1.00e-04 - 4.9s
+Epoch 180/300 - loss: 0.5383 (mae 0.0123 mrstft 0.4158) - val: 0.5301 (mae 0.0114 mrstft 0.4165) - lr: 1.00e-04 - 4.9s
+Epoch 181/300 - loss: 0.5332 (mae 0.0120 mrstft 0.4136) - val: 0.5261 (mae 0.0111 mrstft 0.4150) - lr: 1.00e-04 - 4.8s
+Epoch 182/300 - loss: 0.5302 (mae 0.0118 mrstft 0.4120) - val: 0.5364 (mae 0.0119 mrstft 0.4173) - lr: 1.00e-04 - 4.9s
+Epoch 183/300 - loss: 0.5291 (mae 0.0119 mrstft 0.4104) - val: 0.5188 (mae 0.0109 mrstft 0.4097) - lr: 1.00e-04 - 4.9s
+Epoch 184/300 - loss: 0.5223 (mae 0.0115 mrstft 0.4071) - val: 0.5255 (mae 0.0115 mrstft 0.4106) - lr: 1.00e-04 - 4.9s
+Epoch 185/300 - loss: 0.5219 (mae 0.0116 mrstft 0.4055) - val: 0.5531 (mae 0.0135 mrstft 0.4177) - lr: 1.00e-04 - 4.9s
+Epoch 186/300 - loss: 0.5173 (mae 0.0114 mrstft 0.4032) - val: 0.5126 (mae 0.0108 mrstft 0.4045) - lr: 1.00e-04 - 4.8s
+Epoch 187/300 - loss: 0.5125 (mae 0.0112 mrstft 0.4009) - val: 0.5083 (mae 0.0105 mrstft 0.4033) - lr: 1.00e-04 - 4.9s
+Epoch 188/300 - loss: 0.5106 (mae 0.0111 mrstft 0.3994) - val: 0.5099 (mae 0.0107 mrstft 0.4024) - lr: 1.00e-04 - 4.9s
+Epoch 189/300 - loss: 0.5086 (mae 0.0110 mrstft 0.3984) - val: 0.5036 (mae 0.0102 mrstft 0.4012) - lr: 1.00e-04 - 4.9s
+Epoch 190/300 - loss: 0.5078 (mae 0.0111 mrstft 0.3970) - val: 0.4982 (mae 0.0102 mrstft 0.3966) - lr: 1.00e-04 - 4.8s
+Epoch 191/300 - loss: 0.5056 (mae 0.0110 mrstft 0.3952) - val: 0.4960 (mae 0.0101 mrstft 0.3955) - lr: 1.00e-04 - 4.9s
+Epoch 192/300 - loss: 0.5079 (mae 0.0113 mrstft 0.3951) - val: 0.5032 (mae 0.0106 mrstft 0.3976) - lr: 1.00e-04 - 4.9s
+Epoch 193/300 - loss: 0.5003 (mae 0.0108 mrstft 0.3924) - val: 0.4973 (mae 0.0102 mrstft 0.3948) - lr: 1.00e-04 - 4.9s
+Epoch 194/300 - loss: 0.5020 (mae 0.0110 mrstft 0.3918) - val: 0.4947 (mae 0.0101 mrstft 0.3940) - lr: 1.00e-04 - 4.9s
+Epoch 195/300 - loss: 0.4965 (mae 0.0107 mrstft 0.3896) - val: 0.4987 (mae 0.0105 mrstft 0.3938) - lr: 1.00e-04 - 4.8s
+Epoch 196/300 - loss: 0.4937 (mae 0.0106 mrstft 0.3879) - val: 0.4933 (mae 0.0103 mrstft 0.3904) - lr: 1.00e-04 - 4.9s
+Epoch 197/300 - loss: 0.4910 (mae 0.0104 mrstft 0.3869) - val: 0.4937 (mae 0.0104 mrstft 0.3898) - lr: 1.00e-04 - 4.9s
+Epoch 198/300 - loss: 0.4872 (mae 0.0102 mrstft 0.3852) - val: 0.4822 (mae 0.0096 mrstft 0.3865) - lr: 1.00e-04 - 4.9s
+Epoch 199/300 - loss: 0.4854 (mae 0.0102 mrstft 0.3837) - val: 0.4809 (mae 0.0096 mrstft 0.3852) - lr: 1.00e-04 - 4.8s
+Epoch 200/300 - loss: 0.4852 (mae 0.0103 mrstft 0.3821) - val: 0.4787 (mae 0.0095 mrstft 0.3840) - lr: 1.00e-04 - 4.8s
+Epoch 201/300 - loss: 0.4798 (mae 0.0100 mrstft 0.3798) - val: 0.4760 (mae 0.0092 mrstft 0.3836) - lr: 1.00e-04 - 4.9s
+Epoch 202/300 - loss: 0.4770 (mae 0.0099 mrstft 0.3783) - val: 0.4722 (mae 0.0092 mrstft 0.3799) - lr: 1.00e-04 - 4.9s
+Epoch 203/300 - loss: 0.4764 (mae 0.0100 mrstft 0.3763) - val: 0.4809 (mae 0.0098 mrstft 0.3828) - lr: 1.00e-04 - 4.8s
+Epoch 204/300 - loss: 0.4733 (mae 0.0098 mrstft 0.3753) - val: 0.4676 (mae 0.0090 mrstft 0.3774) - lr: 1.00e-04 - 4.8s
+Epoch 205/300 - loss: 0.4746 (mae 0.0099 mrstft 0.3755) - val: 0.4758 (mae 0.0097 mrstft 0.3789) - lr: 1.00e-04 - 4.9s
+Epoch 206/300 - loss: 0.4707 (mae 0.0098 mrstft 0.3732) - val: 0.4639 (mae 0.0090 mrstft 0.3738) - lr: 1.00e-04 - 4.9s
+Epoch 207/300 - loss: 0.4694 (mae 0.0097 mrstft 0.3721) - val: 0.4612 (mae 0.0089 mrstft 0.3727) - lr: 1.00e-04 - 4.9s
+Epoch 208/300 - loss: 0.4646 (mae 0.0094 mrstft 0.3702) - val: 0.4887 (mae 0.0108 mrstft 0.3809) - lr: 1.00e-04 - 4.8s
+Epoch 209/300 - loss: 0.4636 (mae 0.0095 mrstft 0.3690) - val: 0.4576 (mae 0.0088 mrstft 0.3701) - lr: 1.00e-04 - 4.9s
+Epoch 210/300 - loss: 0.4600 (mae 0.0093 mrstft 0.3668) - val: 0.4598 (mae 0.0089 mrstft 0.3703) - lr: 1.00e-04 - 4.9s
+Epoch 211/300 - loss: 0.4588 (mae 0.0093 mrstft 0.3658) - val: 0.4545 (mae 0.0087 mrstft 0.3677) - lr: 1.00e-04 - 4.9s
+Epoch 212/300 - loss: 0.4561 (mae 0.0091 mrstft 0.3648) - val: 0.4518 (mae 0.0086 mrstft 0.3655) - lr: 1.00e-04 - 4.9s
+Epoch 213/300 - loss: 0.4598 (mae 0.0095 mrstft 0.3643) - val: 0.4487 (mae 0.0084 mrstft 0.3645) - lr: 1.00e-04 - 4.8s
+Epoch 214/300 - loss: 0.4563 (mae 0.0093 mrstft 0.3629) - val: 0.4494 (mae 0.0083 mrstft 0.3661) - lr: 1.00e-04 - 4.9s
+Epoch 215/300 - loss: 0.4534 (mae 0.0091 mrstft 0.3619) - val: 0.4509 (mae 0.0085 mrstft 0.3659) - lr: 1.00e-04 - 4.9s
+Epoch 216/300 - loss: 0.4521 (mae 0.0091 mrstft 0.3607) - val: 0.4683 (mae 0.0102 mrstft 0.3666) - lr: 1.00e-04 - 4.9s
+Epoch 217/300 - loss: 0.4508 (mae 0.0092 mrstft 0.3591) - val: 0.4540 (mae 0.0089 mrstft 0.3645) - lr: 1.00e-04 - 4.9s
+Epoch 218/300 - loss: 0.4477 (mae 0.0090 mrstft 0.3576) - val: 0.4441 (mae 0.0085 mrstft 0.3594) - lr: 1.00e-04 - 4.9s
+Epoch 219/300 - loss: 0.4483 (mae 0.0091 mrstft 0.3570) - val: 0.4438 (mae 0.0084 mrstft 0.3595) - lr: 1.00e-04 - 4.9s
+Epoch 220/300 - loss: 0.4415 (mae 0.0087 mrstft 0.3545) - val: 0.4420 (mae 0.0083 mrstft 0.3586) - lr: 1.00e-04 - 4.9s
+Epoch 221/300 - loss: 0.4408 (mae 0.0088 mrstft 0.3530) - val: 0.4365 (mae 0.0082 mrstft 0.3545) - lr: 1.00e-04 - 4.9s
+Epoch 222/300 - loss: 0.4406 (mae 0.0088 mrstft 0.3526) - val: 0.4359 (mae 0.0081 mrstft 0.3548) - lr: 1.00e-04 - 4.9s
+Epoch 223/300 - loss: 0.4420 (mae 0.0090 mrstft 0.3520) - val: 0.4346 (mae 0.0081 mrstft 0.3533) - lr: 1.00e-04 - 4.9s
+Epoch 224/300 - loss: 0.4389 (mae 0.0088 mrstft 0.3509) - val: 0.4338 (mae 0.0080 mrstft 0.3539) - lr: 1.00e-04 - 4.9s
+Epoch 225/300 - loss: 0.4362 (mae 0.0086 mrstft 0.3500) - val: 0.4385 (mae 0.0086 mrstft 0.3525) - lr: 1.00e-04 - 4.9s
+Epoch 226/300 - loss: 0.4336 (mae 0.0085 mrstft 0.3482) - val: 0.4319 (mae 0.0080 mrstft 0.3519) - lr: 1.00e-04 - 4.8s
+Epoch 227/300 - loss: 0.4334 (mae 0.0086 mrstft 0.3477) - val: 0.4389 (mae 0.0088 mrstft 0.3513) - lr: 1.00e-04 - 4.8s
+Epoch 228/300 - loss: 0.4323 (mae 0.0086 mrstft 0.3468) - val: 0.4361 (mae 0.0085 mrstft 0.3512) - lr: 1.00e-04 - 4.9s
+Epoch 229/300 - loss: 0.4305 (mae 0.0085 mrstft 0.3458) - val: 0.4288 (mae 0.0081 mrstft 0.3476) - lr: 1.00e-04 - 4.9s
+Epoch 230/300 - loss: 0.4299 (mae 0.0084 mrstft 0.3457) - val: 0.4361 (mae 0.0085 mrstft 0.3510) - lr: 1.00e-04 - 4.9s
+Epoch 231/300 - loss: 0.4301 (mae 0.0086 mrstft 0.3446) - val: 0.4258 (mae 0.0080 mrstft 0.3460) - lr: 1.00e-04 - 4.8s
+Epoch 232/300 - loss: 0.4270 (mae 0.0084 mrstft 0.3434) - val: 0.4222 (mae 0.0077 mrstft 0.3457) - lr: 1.00e-04 - 4.9s
+Epoch 233/300 - loss: 0.4228 (mae 0.0081 mrstft 0.3416) - val: 0.4195 (mae 0.0076 mrstft 0.3436) - lr: 1.00e-04 - 4.9s
+Epoch 234/300 - loss: 0.4243 (mae 0.0083 mrstft 0.3411) - val: 0.4240 (mae 0.0081 mrstft 0.3433) - lr: 1.00e-04 - 4.9s
+Epoch 235/300 - loss: 0.4205 (mae 0.0081 mrstft 0.3398) - val: 0.4168 (mae 0.0074 mrstft 0.3424) - lr: 1.00e-04 - 4.9s
+Epoch 236/300 - loss: 0.4210 (mae 0.0082 mrstft 0.3392) - val: 0.4191 (mae 0.0076 mrstft 0.3432) - lr: 1.00e-04 - 4.8s
+Epoch 237/300 - loss: 0.4178 (mae 0.0080 mrstft 0.3378) - val: 0.4180 (mae 0.0077 mrstft 0.3409) - lr: 1.00e-04 - 4.9s
+Epoch 238/300 - loss: 0.4179 (mae 0.0081 mrstft 0.3371) - val: 0.4279 (mae 0.0083 mrstft 0.3447) - lr: 1.00e-04 - 4.9s
+Epoch 239/300 - loss: 0.4177 (mae 0.0081 mrstft 0.3365) - val: 0.4109 (mae 0.0073 mrstft 0.3377) - lr: 1.00e-04 - 4.9s
+Epoch 240/300 - loss: 0.4144 (mae 0.0079 mrstft 0.3350) - val: 0.4190 (mae 0.0080 mrstft 0.3394) - lr: 1.00e-04 - 4.8s
+Epoch 241/300 - loss: 0.4134 (mae 0.0079 mrstft 0.3343) - val: 0.4089 (mae 0.0073 mrstft 0.3360) - lr: 1.00e-04 - 4.9s
+Epoch 242/300 - loss: 0.4131 (mae 0.0079 mrstft 0.3338) - val: 0.4107 (mae 0.0075 mrstft 0.3361) - lr: 1.00e-04 - 4.9s
+Epoch 243/300 - loss: 0.4118 (mae 0.0079 mrstft 0.3328) - val: 0.4129 (mae 0.0076 mrstft 0.3367) - lr: 1.00e-04 - 4.9s
+Epoch 244/300 - loss: 0.4095 (mae 0.0078 mrstft 0.3319) - val: 0.4140 (mae 0.0079 mrstft 0.3347) - lr: 1.00e-04 - 4.9s
+Epoch 245/300 - loss: 0.4105 (mae 0.0079 mrstft 0.3313) - val: 0.4176 (mae 0.0082 mrstft 0.3359) - lr: 1.00e-04 - 4.8s
+Epoch 246/300 - loss: 0.4119 (mae 0.0080 mrstft 0.3320) - val: 0.4046 (mae 0.0072 mrstft 0.3322) - lr: 1.00e-04 - 4.9s
+Epoch 247/300 - loss: 0.4053 (mae 0.0076 mrstft 0.3293) - val: 0.4036 (mae 0.0071 mrstft 0.3325) - lr: 1.00e-04 - 4.9s
+Epoch 248/300 - loss: 0.4043 (mae 0.0076 mrstft 0.3281) - val: 0.4024 (mae 0.0071 mrstft 0.3315) - lr: 1.00e-04 - 4.9s
+Epoch 249/300 - loss: 0.4043 (mae 0.0076 mrstft 0.3278) - val: 0.4153 (mae 0.0083 mrstft 0.3327) - lr: 1.00e-04 - 4.9s
+Epoch 250/300 - loss: 0.4026 (mae 0.0076 mrstft 0.3269) - val: 0.3995 (mae 0.0071 mrstft 0.3283) - lr: 1.00e-04 - 4.9s
+Epoch 251/300 - loss: 0.4025 (mae 0.0076 mrstft 0.3264) - val: 0.3981 (mae 0.0070 mrstft 0.3286) - lr: 1.00e-04 - 4.9s
+Epoch 252/300 - loss: 0.4008 (mae 0.0075 mrstft 0.3255) - val: 0.3981 (mae 0.0071 mrstft 0.3270) - lr: 1.00e-04 - 4.9s
+Epoch 253/300 - loss: 0.3998 (mae 0.0075 mrstft 0.3244) - val: 0.3937 (mae 0.0068 mrstft 0.3257) - lr: 1.00e-04 - 4.9s
+Epoch 254/300 - loss: 0.3981 (mae 0.0075 mrstft 0.3235) - val: 0.3967 (mae 0.0069 mrstft 0.3274) - lr: 1.00e-04 - 4.8s
+Epoch 255/300 - loss: 0.3956 (mae 0.0073 mrstft 0.3223) - val: 0.3994 (mae 0.0072 mrstft 0.3271) - lr: 1.00e-04 - 4.9s
+Epoch 256/300 - loss: 0.3966 (mae 0.0074 mrstft 0.3230) - val: 0.3940 (mae 0.0069 mrstft 0.3247) - lr: 1.00e-04 - 4.9s
+Epoch 257/300 - loss: 0.3950 (mae 0.0074 mrstft 0.3213) - val: 0.3903 (mae 0.0067 mrstft 0.3236) - lr: 1.00e-04 - 4.9s
+Epoch 258/300 - loss: 0.3957 (mae 0.0075 mrstft 0.3210) - val: 0.3983 (mae 0.0073 mrstft 0.3254) - lr: 1.00e-04 - 4.9s
+Epoch 259/300 - loss: 0.3936 (mae 0.0073 mrstft 0.3204) - val: 0.3883 (mae 0.0067 mrstft 0.3213) - lr: 1.00e-04 - 4.9s
+Epoch 260/300 - loss: 0.3925 (mae 0.0073 mrstft 0.3194) - val: 0.3867 (mae 0.0066 mrstft 0.3206) - lr: 1.00e-04 - 4.9s
+Epoch 261/300 - loss: 0.3935 (mae 0.0074 mrstft 0.3194) - val: 0.3960 (mae 0.0069 mrstft 0.3272) - lr: 1.00e-04 - 4.9s
+Epoch 262/300 - loss: 0.3903 (mae 0.0072 mrstft 0.3188) - val: 0.3933 (mae 0.0071 mrstft 0.3224) - lr: 1.00e-04 - 4.9s
+Epoch 263/300 - loss: 0.3893 (mae 0.0071 mrstft 0.3180) - val: 0.3858 (mae 0.0065 mrstft 0.3203) - lr: 1.00e-04 - 4.8s
+Epoch 264/300 - loss: 0.3868 (mae 0.0070 mrstft 0.3169) - val: 0.3883 (mae 0.0069 mrstft 0.3191) - lr: 1.00e-04 - 4.9s
+Epoch 265/300 - loss: 0.3845 (mae 0.0069 mrstft 0.3150) - val: 0.3811 (mae 0.0064 mrstft 0.3171) - lr: 1.00e-04 - 4.9s
+Epoch 266/300 - loss: 0.3859 (mae 0.0071 mrstft 0.3147) - val: 0.3826 (mae 0.0065 mrstft 0.3180) - lr: 1.00e-04 - 4.9s
+Epoch 267/300 - loss: 0.3845 (mae 0.0070 mrstft 0.3145) - val: 0.3851 (mae 0.0068 mrstft 0.3173) - lr: 1.00e-04 - 4.8s
+Epoch 268/300 - loss: 0.3840 (mae 0.0070 mrstft 0.3141) - val: 0.3828 (mae 0.0065 mrstft 0.3182) - lr: 1.00e-04 - 4.8s
+Epoch 269/300 - loss: 0.3839 (mae 0.0070 mrstft 0.3144) - val: 0.3930 (mae 0.0074 mrstft 0.3194) - lr: 1.00e-04 - 4.9s
+Epoch 270/300 - loss: 0.3863 (mae 0.0072 mrstft 0.3144) - val: 0.3779 (mae 0.0063 mrstft 0.3147) - lr: 1.00e-04 - 4.9s
+Epoch 271/300 - loss: 0.3825 (mae 0.0070 mrstft 0.3124) - val: 0.3765 (mae 0.0062 mrstft 0.3141) - lr: 1.00e-04 - 4.8s
+Epoch 272/300 - loss: 0.3797 (mae 0.0068 mrstft 0.3117) - val: 0.3972 (mae 0.0076 mrstft 0.3208) - lr: 1.00e-04 - 4.8s
+Epoch 273/300 - loss: 0.3822 (mae 0.0070 mrstft 0.3125) - val: 0.3754 (mae 0.0063 mrstft 0.3128) - lr: 1.00e-04 - 4.9s
+Epoch 274/300 - loss: 0.3782 (mae 0.0068 mrstft 0.3105) - val: 0.3740 (mae 0.0062 mrstft 0.3118) - lr: 1.00e-04 - 4.9s
+Epoch 275/300 - loss: 0.3784 (mae 0.0068 mrstft 0.3105) - val: 0.3808 (mae 0.0067 mrstft 0.3133) - lr: 1.00e-04 - 4.9s
+Epoch 276/300 - loss: 0.3775 (mae 0.0067 mrstft 0.3104) - val: 0.3751 (mae 0.0062 mrstft 0.3133) - lr: 1.00e-04 - 4.9s
+Epoch 277/300 - loss: 0.3781 (mae 0.0068 mrstft 0.3101) - val: 0.3738 (mae 0.0062 mrstft 0.3113) - lr: 1.00e-04 - 4.8s
+Epoch 278/300 - loss: 0.3736 (mae 0.0065 mrstft 0.3088) - val: 0.3712 (mae 0.0059 mrstft 0.3119) - lr: 1.00e-04 - 4.9s
+Epoch 279/300 - loss: 0.3784 (mae 0.0069 mrstft 0.3095) - val: 0.3716 (mae 0.0060 mrstft 0.3117) - lr: 1.00e-04 - 4.9s
+Epoch 280/300 - loss: 0.3710 (mae 0.0064 mrstft 0.3068) - val: 0.3824 (mae 0.0068 mrstft 0.3141) - lr: 1.00e-04 - 4.9s
+Epoch 281/300 - loss: 0.3712 (mae 0.0064 mrstft 0.3069) - val: 0.3685 (mae 0.0059 mrstft 0.3098) - lr: 1.00e-04 - 4.8s
+Epoch 282/300 - loss: 0.3701 (mae 0.0064 mrstft 0.3065) - val: 0.3696 (mae 0.0061 mrstft 0.3084) - lr: 1.00e-04 - 4.9s
+Epoch 283/300 - loss: 0.3689 (mae 0.0063 mrstft 0.3059) - val: 0.3706 (mae 0.0062 mrstft 0.3082) - lr: 1.00e-04 - 4.9s
+Epoch 284/300 - loss: 0.3679 (mae 0.0062 mrstft 0.3056) - val: 0.3679 (mae 0.0060 mrstft 0.3079) - lr: 1.00e-04 - 4.9s
+Epoch 285/300 - loss: 0.3668 (mae 0.0062 mrstft 0.3044) - val: 0.3689 (mae 0.0062 mrstft 0.3070) - lr: 1.00e-04 - 4.8s
+Epoch 286/300 - loss: 0.3663 (mae 0.0062 mrstft 0.3046) - val: 0.3644 (mae 0.0057 mrstft 0.3079) - lr: 1.00e-04 - 4.8s
+Epoch 287/300 - loss: 0.3652 (mae 0.0061 mrstft 0.3041) - val: 0.3647 (mae 0.0057 mrstft 0.3075) - lr: 1.00e-04 - 4.9s
+Epoch 288/300 - loss: 0.3675 (mae 0.0064 mrstft 0.3037) - val: 0.3655 (mae 0.0059 mrstft 0.3061) - lr: 1.00e-04 - 4.9s
+Epoch 289/300 - loss: 0.3637 (mae 0.0061 mrstft 0.3028) - val: 0.3825 (mae 0.0071 mrstft 0.3114) - lr: 1.00e-04 - 4.9s
+Epoch 290/300 - loss: 0.3632 (mae 0.0061 mrstft 0.3025) - val: 0.3601 (mae 0.0056 mrstft 0.3037) - lr: 1.00e-04 - 4.8s
+Epoch 291/300 - loss: 0.3603 (mae 0.0059 mrstft 0.3011) - val: 0.3648 (mae 0.0057 mrstft 0.3074) - lr: 1.00e-04 - 4.9s
+Epoch 292/300 - loss: 0.3610 (mae 0.0060 mrstft 0.3012) - val: 0.3574 (mae 0.0054 mrstft 0.3032) - lr: 1.00e-04 - 4.9s
+Epoch 293/300 - loss: 0.3586 (mae 0.0058 mrstft 0.3006) - val: 0.3682 (mae 0.0062 mrstft 0.3059) - lr: 1.00e-04 - 4.9s
+Epoch 294/300 - loss: 0.3611 (mae 0.0061 mrstft 0.3005) - val: 0.3561 (mae 0.0054 mrstft 0.3021) - lr: 1.00e-04 - 4.9s
+Epoch 295/300 - loss: 0.3583 (mae 0.0059 mrstft 0.2993) - val: 0.3541 (mae 0.0054 mrstft 0.3005) - lr: 1.00e-04 - 4.8s
+Epoch 296/300 - loss: 0.3552 (mae 0.0057 mrstft 0.2983) - val: 0.3669 (mae 0.0064 mrstft 0.3029) - lr: 1.00e-04 - 4.9s
+Epoch 297/300 - loss: 0.3587 (mae 0.0059 mrstft 0.2994) - val: 0.3566 (mae 0.0053 mrstft 0.3034) - lr: 1.00e-04 - 4.9s
+Epoch 298/300 - loss: 0.3568 (mae 0.0059 mrstft 0.2983) - val: 0.3526 (mae 0.0053 mrstft 0.3000) - lr: 1.00e-04 - 4.9s
+Epoch 299/300 - loss: 0.3569 (mae 0.0058 mrstft 0.2984) - val: 0.3629 (mae 0.0060 mrstft 0.3029) - lr: 1.00e-04 - 4.8s
+Epoch 300/300 - loss: 0.3561 (mae 0.0058 mrstft 0.2980) - val: 0.3583 (mae 0.0056 mrstft 0.3027) - lr: 1.00e-04 - 4.9s
+Training complete in 24.4m (1467s)
+Best val_loss: 0.3526
+Total batches skipped (bad gradients): 417
+Weights exported to models/dist_13_gru64_l1x10\weights.json
+Loss history saved to models/dist_13_gru64_l1x10\loss_history.csv

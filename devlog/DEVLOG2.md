@@ -1468,3 +1468,36 @@ Trained dist_11 at 64 GRU units on the same breadboard data and config as dist_1
 The v2 rerun reproduced the poor 128u result, ruling out a bad initialization. 64u outperforms 128u by roughly 20 dB on both training and held-out bench despite using half the capacity. The most likely explanation is that the larger model overfit to minimizing MR-STFT magnitude loss without tracking the waveform, since spectral loss can be satisfied by outputs that match frequency content but not sample-level alignment. The smaller model's lower capacity acts as implicit regularization that prevents this shortcut.
 
 dist_11_gru64 is the primary distortion model going forward. dist_10_gru128_v2 is discarded. The distnn opcode will be updated to deploy the 64u weights.
+
+---
+
+## Runs dist_12 and dist_13: L1 weighting fix
+
+### Hypothesis
+
+The 128u failure was a loss function problem, not a capacity one. MR-STFT is phase-agnostic: it scores log-magnitude only, so a model with enough capacity can satisfy the loss with outputs that match spectral content but not sample-level alignment. In the training logs, MR-STFT runs at roughly 0.74 and L1 at 0.035, a 21:1 ratio. At that imbalance the 128u model learned a phase-incoherent shortcut. The 64u model could not exploit it because its limited capacity forced it to rely on the L1 waveform signal. Adding `L1_WEIGHT=10` to the combined loss raises the L1 contribution from ~5% to ~32% of the total, removing the shortcut for the larger model.
+
+### Training changes
+
+`tensor_torch_distortion.py` updated:
+
+- `l1_weight` added as an optional third CLI argument (default 1.0). Applied as `L1_WEIGHT * l_mae + l_mrstft` in `combined_loss`.
+- When `L1_WEIGHT > 1.0`, LR drops from 3e-4 to 1e-4 and clip norm from 0.5 to 0.3. The higher weighted loss scale raises gradient magnitudes and causes explosion at the original settings, matching the same instability pattern seen in the dist_07 and dist_08 NaN debugging.
+- Gradient NaN skip added to the training loop: after `loss.backward()`, if any gradient is non-finite the optimizer step is skipped and the batch is discarded. This prevents a single bad batch from corrupting the weights irreversibly. The breadboard recordings contain windows where dry and wet have mismatched transients that can produce gradient spikes large enough that the Adam moment estimates amplify them past what clip norm can contain. Skipped batch count is logged per epoch and at training end.
+
+### Results
+
+| Model | GRU | train ESR | bench ESR (held-out) | bench-10dB (held-out) |
+|-------|-----|-----------|----------------------|-----------------------|
+| dist_10_gru128 | 128u | -6.9 | -5.3 | -3.2 |
+| dist_11_gru64 | 64u | -22.7 | -25.7 | -- |
+| dist_12_gru128_l1x10 | 128u | -26.6 | -29.2 | -28.2 |
+| dist_13_gru64_l1x10 | 64u | -22.8 | -26.2 | -24.9 |
+
+### Analysis
+
+dist_12 (128u, L1x10) is the clear winner at -29.2 dB held-out, 3 dB above the previous best (dist_11). The hypothesis is confirmed: the original 128u failure was entirely due to the loss shortcut, not insufficient capacity. With the shortcut removed, the extra capacity pays off as expected.
+
+dist_13 (64u, L1x10) is nearly identical to dist_11 (64u, no L1 weighting): -26.2 vs -25.7 dB on bench, -22.8 vs -22.7 dB on training. The L1 weighting had almost no effect on the smaller model, confirming that its limited capacity was already acting as implicit regularization. The 128u improvement came entirely from capacity that could now be used correctly.
+
+dist_12_gru128_l1x10 is the new primary distortion model. The distnn opcode should be updated to deploy these weights.

@@ -11,9 +11,9 @@ from json import JSONEncoder
 from model_distortion import Model
 from torch.utils.data import DataLoader, TensorDataset
 
-if len(sys.argv) < 2 or len(sys.argv) > 3:
-    print(f"Usage: {sys.argv[0]} <output_dir> [gru_hidden]")
-    print(f"  e.g. {sys.argv[0]} models/dist_10_gru128 128")
+if len(sys.argv) < 2 or len(sys.argv) > 4:
+    print(f"Usage: {sys.argv[0]} <output_dir> [gru_hidden] [l1_weight]")
+    print(f"  e.g. {sys.argv[0]} models/dist_12_gru128_l1x10 128 10")
     sys.exit(1)
 
 OUT_DIR = sys.argv[1]
@@ -33,12 +33,16 @@ _log = open(os.path.join(OUT_DIR, "training.log"), "w")
 sys.stdout = _Tee(sys.__stdout__, _log)
 sys.stderr = _Tee(sys.__stderr__, _log)
 
-GRU_HIDDEN  = int(sys.argv[2]) if len(sys.argv) == 3 else 128
+GRU_HIDDEN  = int(sys.argv[2]) if len(sys.argv) >= 3 else 128
+L1_WEIGHT   = float(sys.argv[3]) if len(sys.argv) == 4 else 1.0
 CELL        = 'gru'
 window_size = 8192
 warmup_size = 256
 VAL_FRAC    = 0.2
 SEED        = 42
+LR             = 1e-4 if L1_WEIGHT > 1.0 else 3e-4
+CLIP           = 0.3  if L1_WEIGHT > 1.0 else 0.5
+SCHED_PATIENCE = 10   if L1_WEIGHT > 1.0 else 20
 
 PAIRS = [
     ("audio/updatedDistortion/trainingDry.wav",    "audio/updatedDistortion/trainingWet.wav"),
@@ -77,6 +81,7 @@ def load_and_split(dry_path, wet_path, sr=None):
     return X[tr_idx], Y[tr_idx], X[val_idx], Y[val_idx], sr_
 
 
+print(f"Config: GRU_HIDDEN={GRU_HIDDEN} CELL={CELL} L1_WEIGHT={L1_WEIGHT} LR={LR} CLIP={CLIP} SCHED_PATIENCE={SCHED_PATIENCE}")
 print("Loading training data...")
 sr = None
 X_train_parts, Y_train_parts = [], []
@@ -107,8 +112,9 @@ Y_val   = torch.tensor(Y_val,   dtype=torch.float32).to(device)
 train_loader = DataLoader(TensorDataset(X_train, Y_train), batch_size=64, shuffle=True)
 
 model     = Model(gru_hidden=GRU_HIDDEN, cell=CELL).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20, factor=0.5, min_lr=1e-6)
+optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+print(f"Optimizer: lr={LR} clip={CLIP}")
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=SCHED_PATIENCE, factor=0.5, min_lr=1e-6)
 
 _MRSTFT_PARAMS = [
     (2048, 512,  2048),
@@ -138,7 +144,7 @@ def combined_loss(pred, target):
             _stft_log_mag(t, fft_size, hop_size, win_length),
         )
     l_mrstft = l_mrstft / len(_MRSTFT_PARAMS)
-    return l_mae + l_mrstft, l_mae, l_mrstft
+    return L1_WEIGHT * l_mae + l_mrstft, l_mae, l_mrstft
 
 
 best_val_loss = float('inf')
@@ -148,17 +154,28 @@ epochs = 300
 train_losses = []
 val_losses   = []
 train_start = time.time()
+total_skipped = 0
 
 for epoch in range(epochs):
     epoch_start = time.time()
     model.train()
     train_loss = train_mae = train_mrstft = 0.0
+    skipped = 0
     for xb, yb in train_loader:
         optimizer.zero_grad()
         pred, _ = model(xb)
         loss, l_mae, l_mrstft = combined_loss(pred[:, warmup_size:, :], yb[:, warmup_size:, :])
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
+        grad_finite = all(
+            torch.isfinite(p.grad).all()
+            for p in model.parameters() if p.grad is not None
+        )
+        if not grad_finite:
+            optimizer.zero_grad()
+            skipped += 1
+            total_skipped += 1
+            continue
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=CLIP)
         optimizer.step()
         n = len(xb)
         train_loss   += loss.item()     * n
@@ -199,9 +216,10 @@ for epoch in range(epochs):
 
     lr = optimizer.param_groups[0]['lr']
     epoch_time = time.time() - epoch_start
+    skip_str = f" - skipped {skipped}" if skipped else ""
     print(f"Epoch {epoch+1}/{epochs} - loss: {train_loss:.4f} (mae {train_mae:.4f} mrstft {train_mrstft:.4f})"
           f" - val: {val_loss:.4f} (mae {val_mae:.4f} mrstft {val_mrstft:.4f})"
-          f" - lr: {lr:.2e} - {epoch_time:.1f}s")
+          f" - lr: {lr:.2e} - {epoch_time:.1f}s{skip_str}")
 
     if epochs_without_improvement >= early_stop_patience:
         print(f"Early stopping: val_loss has not improved for {early_stop_patience} epochs.")
@@ -210,6 +228,7 @@ for epoch in range(epochs):
 total_time = time.time() - train_start
 print(f"Training complete in {total_time/60:.1f}m ({total_time:.0f}s)")
 print(f"Best val_loss: {best_val_loss:.4f}")
+print(f"Total batches skipped (bad gradients): {total_skipped}")
 
 checkpoint = torch.load(os.path.join(OUT_DIR, 'best_model.pt'))
 model.load_state_dict(checkpoint['model_state'])
