@@ -17,7 +17,7 @@ gisaw    ftgen 3, 0, 1024, 7, 1, 512, 1, 0, -1, 512, -1
 massign 0, 1
 
 instr 99
-  iignore moognn_preload "models/19_moog_100-20k_128u_w256/weights.json"
+  iignore moognn_preload "models/27_moog_variable_allrates_128u_w256/weights.json"
 endin
 
 instr 1
@@ -32,7 +32,7 @@ instr 1
   kcc = portk:k(kcc, 0.01)
   kcutoff  = 20 * pow(1000, kcc)
 
-  aout   moognn128 asaw, "models/19_moog_100-20k_128u_w256/weights.json", kcutoff
+  aout   moognn128 asaw, "models/27_moog_variable_allrates_128u_w256/weights.json", kcutoff
   out aout
 endin
 
