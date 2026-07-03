@@ -235,7 +235,7 @@ Opcode signature: `aout moognn{N} ain, Spath, kcutoff`
 |--------|-----------|---------------|
 | `moognn32`  | 32  | `models/25_moog_100-20k_32u/weights.json` |
 | `moognn64`  | 64  | `models/16_moog_100-20k_64u_w256/weights.json` |
-| `moognn128` | 128 | `models/19_moog_100-20k_128u_w256/weights.json` (deployed) |
+| `moognn128` | 128 | `models/23_moog_variable_128u_w256/weights.json` (deployed) |
 | `moognn256` | 256 | `models/26_moog_100-20k_256u/weights.json` |
 
 Arguments:
@@ -321,9 +321,10 @@ python python/eval_distortion.py <model.pt> [warmup] [--dry <path>] [--wet <path
 
 ## Next steps
 
-- Update `distnn` opcode to deploy `dist_12_gru128_l1x10` weights (currently still pointing at dist_07)
-- Run full benchmark matrix (`bench/run_benchmarks.py`) and generate paper figures
-- Paper: Csound conference writeup
+- **Paper**: Csound conference writeup
+- Moog: extend LFO training range to 20kHz and retrain LFO-only model (run 24 collapses above 10kHz due to the sweep ceiling); consider mixing with static high-frequency windows to anchor the model above the LFO range
+- ~~Update `distnn` opcode to deploy `dist_12_gru128_l1x10` weights~~ -- done
+- ~~Run full benchmark matrix (`bench/run_benchmarks.py`) and generate paper figures~~ -- done; see `bench/results/`
 - ~~Variable-parameter training data~~ -- complete (run 23); +10 dB on fast LFO
 - ~~FiLM conditioning experiment~~ -- complete (runs 21-22); pre-GRU FiLM matched concat statically but did not improve dynamic tracking
 - ~~Csound opcode implementation~~ -- done, see `src/csound_opcode/`
