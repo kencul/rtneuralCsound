@@ -32,7 +32,7 @@ instr 1
   kcc = portk:k(kcc, 0.01)
   kcutoff  = 20 * pow(1000, kcc)
 
-  aout   moognn asaw, "models/19_moog_100-20k_128u_w256/weights.json", kcutoff
+  aout   moognn128 asaw, "models/19_moog_100-20k_128u_w256/weights.json", kcutoff
   out aout
 endin
 

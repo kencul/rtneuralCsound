@@ -47,3 +47,26 @@ target_include_directories(moognn PRIVATE
 target_link_libraries(moognn PRIVATE RTNeural)
 target_compile_features(moognn PRIVATE cxx_std_17)
 set_target_properties(moognn PROPERTIES PREFIX "")
+
+add_library(distnn SHARED src/csound_opcode/distnn.cpp)
+target_include_directories(distnn PRIVATE
+    ${CSOUND_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/vendor/RTNeural
+)
+target_link_libraries(distnn PRIVATE RTNeural)
+target_compile_features(distnn PRIVATE cxx_std_17)
+set_target_properties(distnn PROPERTIES PREFIX "")
+
+add_library(rkmoog SHARED src/csound_opcode/rkmoog.cpp)
+target_include_directories(rkmoog PRIVATE
+    ${CSOUND_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/vendor/MoogLadders/src
+)
+target_compile_features(rkmoog PRIVATE cxx_std_17)
+set_target_properties(rkmoog PROPERTIES PREFIX "")
+
+add_executable(bench_dsp bench/bench_dsp.cpp)
+target_include_directories(bench_dsp PRIVATE
+    ${CMAKE_SOURCE_DIR}/vendor/MoogLadders/src
+)
+target_compile_features(bench_dsp PRIVATE cxx_std_17)

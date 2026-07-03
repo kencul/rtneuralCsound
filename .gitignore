@@ -15,8 +15,11 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Ableton cache
+# Ableton cache and project assets
 *.asd
+testSound Project/Samples/
+testSound Project/Backup/
+testSound Project/distortionProcess.als
 
 # Windows
 Desktop.ini
@@ -32,3 +35,6 @@ audio/filteredOutput/
 vendor/csound/
 
 AnalogFilter/
+
+# Audio files — too large / generated; existing committed files stay tracked
+*.wav

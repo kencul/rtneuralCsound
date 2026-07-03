@@ -711,7 +711,851 @@ Run 23 showed variable training data fixes fast-LFO degradation, but the trainin
 
 ---
 
-## Next steps
+## Next steps (Moog filter)
 
 - **Extend LFO range to 20kHz** and retrain LFO-only model to eliminate the frequency ceiling. Worth combining with a static/LFO mix to anchor high-frequency behavior.
 - **Paper**: write up for the Csound conference -- architecture decisions, ablation results, warmup analysis, opcode implementation, dynamic eval, FiLM experiment results, and variable training data findings.
+
+---
+
+## Distortion effect
+
+### Overview
+
+Second modeling target: a hardware breadboard distortion effect. Unlike the Moog filter (linear, content-independent), distortion is a nonlinear circuit whose output depends on the instantaneous waveform, not just the parameter setting. No controllable parameter at first. This is a fixed-setting, non-parametric effect.
+
+**Architecture:** same Conv1d+GRU+Dense+skip structure as the Moog concat models but with the knob input channel removed. GRU input is 16 (conv features only, no 17th knob channel). Implemented in `python/model_distortion.py`. Training script: `python/tensor_torch_distortion.py`. Eval script: `python/eval_distortion.py`.
+
+**Training data:** three audio files processed through the hardware pedal at the same gain setting:
+
+| File | Role | Duration | Windows |
+|------|------|----------|---------|
+| `distortionTestSound_mono.wav` | Training | 128s | 749 |
+| `bench_mono.wav` | Validation | 40s | 234 |
+| `ruin_mono.wav` | Eval / Training | 60s | 350 |
+
+Wet files are 24-bit stereo recorded from the pedal output; `librosa.load(mono=True)` averages channels on load. `distortionTestSound_mono.wav` was specifically recorded with intentionally varying amplitude levels to expose the input-level-dependent saturation behavior of the circuit.
+
+---
+
+### Run dist_01 (distortionTestSound only, bench val)
+
+**Config:** 128 GRU units, 256 warmup, training on distortionTestSound alone, validation on bench.
+
+**Result:** catastrophic failure. Val loss started at 5.09 (epoch 1) and climbed monotonically to 11.20 by epoch 47 while train loss was still decreasing (1.24 → 0.12). Early stopped at epoch 47. Best val_loss: 4.59.
+
+For reference, the passthrough ESR (model outputs dry) was 3.22 for training and 7.14 for validation. The best val_loss of 4.59 is only marginally better than passthrough -- the model essentially failed to generalize.
+
+**Analysis:** training loss reaching 0.12 (not converging to near-zero like the Moog runs) combined with val loss actively degrading as training progresses is textbook overfitting caused by training and validation data being too different in content.
+
+For the Moog filter, training on `testSound_mono` and validating on `bench_mono` worked because a linear filter's response is content-independent. The same cutoff applied to any audio produces the same frequency response. A distortion circuit does not have this property. The output at each sample depends on the instantaneous waveform shape, not just the amplitude level. A model trained only on `distortionTestSound` learns what the circuit does to that specific audio's patterns; when it sees `bench_mono` (completely different harmonic structure, dynamics, and timbral content), it has no basis for generalization.
+
+This was confirmed by cross-referencing Wilczek et al. (DAFx 2022): their diode clipper models used ~8 minutes of **mixed guitar and bass** recordings for training and validated on a bass-only subset. Using two distinct instrument types in training is what allows the model to learn the general transfer function rather than source-specific mappings. Their key structural difference from run dist_01: training data diversity across content types, not just amplitude levels.
+
+---
+
+### Run dist_02 (distortionTestSound + ruin, bench val, 128u GRU)
+
+**Change from dist_01:** added `ruin_mono.wav` to training alongside `distortionTestSound_mono.wav`, giving two audio sources and 1100 total windows. Validation kept on bench.
+
+**Result:** worse than dist_01. Best val_loss: 5.28 (dist_01 was 4.59). The val loss still climbed from the first epoch.
+
+Adding ruin did not help because ruin and distortionTestSound are not diverse enough relative to bench. The two training sources teach the model similar things, so it still has no exposure to whatever makes bench different.
+
+---
+
+### Run dist_03 (distortionTestSound + ruin, bench val, 256u GRU)
+
+**Change from dist_02:** GRU hidden size doubled to 256 units.
+
+**Result:** best val_loss 4.92, achieved at epoch 1. Every subsequent epoch made bench performance worse. The model was at its closest to bench before it had learned anything at all, meaning training actively moved it away from the bench distribution.
+
+---
+
+### Run dist_04 (distortionTestSound + ruin, bench val, 256u LSTM)
+
+**Change from dist_03:** swapped GRU for LSTM at the same 256 unit count.
+
+**Result:** best val_loss 5.05, also at epoch 1. Same pattern as dist_03.
+
+---
+
+### Analysis across dist_01 to dist_04
+
+Best val_loss across all four runs:
+
+| Run | Architecture | Training sources | Best val_loss | Epoch |
+|-----|-------------|-----------------|---------------|-------|
+| dist_01 | GRU 128u | distortionTestSound | 4.59 | 7 |
+| dist_02 | GRU 128u | distortionTestSound + ruin | 5.28 | 1 |
+| dist_03 | GRU 256u | distortionTestSound + ruin | 4.92 | 1 |
+| dist_04 | LSTM 256u | distortionTestSound + ruin | 5.05 | 1 |
+
+All four cluster around 4.6 to 5.3 with no meaningful improvement across architecture changes or training data additions. The ceiling is not the model. It is the data.
+
+The root cause: bench_mono is too different in content from distortionTestSound and ruin for any black-box model to bridge the gap. For the Moog filter, training on testSound and validating on bench worked because a linear filter's response is content-independent. A distortion circuit is nonlinear -- the output at each sample depends on the instantaneous waveform shape. A model trained on two audio sources learns what the circuit does to those specific waveform patterns. bench_mono has different frequency distribution, dynamics, and harmonic content, so the learned mapping does not transfer.
+
+Runs dist_03 and dist_04 confirmed this is not a capacity problem. Both hit their best val_loss at epoch 1, before any meaningful training had occurred. Larger models overfit faster and diverge more severely.
+
+The Wilczek et al. (DAFx 2022) paper used approximately 8 minutes of mixed guitar and bass for training -- two genuinely distinct instrument types. This is what gives the model enough diversity to generalize. All four distortion runs combined only about 3 minutes of two sources that are apparently not diverse enough relative to bench.
+
+---
+
+## New training data
+
+The core problem across all four runs was insufficient diversity in training audio. To address this, a new 17-minute training file was assembled from a wide range of sources: original Moog filter training audio, personal music project stems, and miscellaneous recordings from disk. The goal was to cover a much broader range of frequency content, dynamics, and timbral variety than distortionTestSound and ruin alone could provide. This file will be processed through the distortion pedal and used as the primary training source for the next run.
+
+---
+
+## Dry/wet alignment
+
+When audio is played through a hardware pedal and recorded back in, the ADC/DAC round-trip of the audio interface introduces a fixed sample offset between the dry and wet files. If this offset is not corrected, the model trains against pairs that are slightly out of sync, which adds noise to every gradient step. For a nonlinear circuit like a diode clipper, where the output depends on the instantaneous waveform, even a few samples of misalignment can meaningfully degrade training.
+
+The offset is measured using cross-correlation. `scipy.signal.correlate(wet, dry)` is computed on the first few seconds of each file (enough to be fast on long recordings). The peak of the correlation gives the lag in samples: positive means the wet is delayed relative to dry, negative means the wet is early. For an analog pedal the latency through the circuit itself is negligible; the offset comes entirely from interface buffering.
+
+**Tool:** `python/align_audio.py`
+
+```
+python python/align_audio.py <dry> <wet> [--sr <rate>] [--save <output_wet_path>] [--force]
+```
+
+Run without `--save` first to inspect the measured lag. Then re-run with `--save <path>` to write the corrected wet file to that path. Dry is never written. Use `--sr` to resample both files to a target rate before aligning; this is needed when the recordings are at a different rate than the training pipeline expects.
+
+When the lag is positive (wet is delayed), the script trims the leading samples from the wet file. When the lag is negative (wet is early), it prepends that many zero samples to the start of wet. In both cases dry is unchanged.
+
+**GigaTestAudio recordings:** wet was 32 samples early at 48 kHz (-0.67 ms). Both GigaTest pairs corrected and saved at 48 kHz. The original wet files were recorded at 96 kHz; the script resampled them on load.
+
+**Bench recordings:** wet was 7 samples early at 48 kHz (0.15 ms). Both bench pairs corrected and saved at 48 kHz via `--sr 48000` (originals were 96 kHz). The consistent direction across both sessions (wet early) matches the interface pre-buffering the capture path.
+
+All corrected files are saved with their original filenames, overwriting the uncorrected versions. No `_aligned` suffix is used.
+
+---
+
+## Runs dist_05 and dist_06 (GigaTestAudio training, 80/20 split)
+
+Both runs used the two GigaTestAudio pairs as the only training data. Each pair was split 80/20 by random window shuffle (fixed seed 42), giving 9,600 train and 2,398 val windows combined. Validation is therefore an in-distribution split of the same audio, not a separate source.
+
+`model_distortion.py` was updated to support both GRU and LSTM via a `cell` parameter (`self.rnn`). The training script (`tensor_torch_distortion.py`) sets `CELL` at the top to switch between them. Checkpoints embed the arch tag so eval auto-detects the cell type.
+
+| Run | Cell | Units | Best val_loss | Epochs | Notes |
+|-----|------|-------|--------------|--------|-------|
+| dist_05 | GRU | 128 | 0.0243 | 190 (early stop) | LR stepped once |
+| dist_06 | LSTM | 128 | 0.0270 | 300 (no early stop) | Still improving slowly at end |
+
+GRU converged faster and to a better optimum. LSTM would likely need more than 300 epochs to match at the same hidden size, consistent with the Moog filter findings.
+
+---
+
+## Eval script: eval_distortion.py
+
+Replaced the single-pair eval with a multi-pair script that runs a fixed set of pairs and prints an ESR table. Default pairs: bench and bench-10dB (held-out), giga and giga-10dB (training). With `--save <dir>`, writes output WAVs and per-pair spectrogram PNGs. With `--show`, opens interactive plots.
+
+```
+python python/eval_distortion.py <model.pt> [--save <dir>] [--show] [--force]
+```
+
+---
+
+## Conv context bug in chunk inference
+
+Processing long audio in chunks revealed a clicking artifact. The CausalConv1d has kernel size 31, so it needs the previous 30 samples of context. During training each window is processed as a single block, so zero-padding only affects the warmup region. During eval, every new 8192-sample chunk started with 30 zeros instead of the actual preceding signal, producing a brief artifact every 170ms.
+
+The fix: carry the last 30 samples of each chunk into the next as a context buffer. Before each forward pass, prepend the buffer to the chunk; after the pass, discard the first 30 output samples (which correspond to the context prefix). The GRU hidden state was already being carried correctly.
+
+Note: passing the padded input (context + chunk) through the full model means the GRU also processes the 30 repeated samples, advancing `h` by 30 extra steps per chunk. At 30/8192 this is negligible in practice but is a known approximation.
+
+---
+
+## Eval results and ESR vs spectrogram
+
+| Pair | Split | GRU ESR | LSTM ESR |
+|------|-------|---------|----------|
+| bench | held-out | 1.1 dB | 1.1 dB |
+| bench-10dB | held-out | 1.4 dB | 1.4 dB |
+| giga | train | -18.6 dB | -19.5 dB |
+| giga-10dB | train | -16.6 dB | -13.9 dB |
+
+Held-out bench ESR is positive (worse than silence) for both models. Both architectures score identically on bench, ruling out any architectural explanation. The failure is distributional: the model learned the pedal's waveform-level behavior on GigaTestAudio but that mapping does not transfer sample-for-sample to bench content.
+
+The bench spectrogram difference, however, looked comparable to or better than giga. This is the key distinction between the two metrics. ESR measures waveform-level error and is sensitive to sample-level phase and timing differences. A spectrogram shows energy distribution and is phase-insensitive. A model that reproduces the general character of the distortion (which harmonics appear, overall saturation) will look good spectrally even if it cannot replicate the exact waveform on unseen audio. For training data the model has memorised the exact mapping, so both metrics agree. For held-out data only the spectral character transfers.
+
+The bench spectrogram looking good is therefore the meaningful signal: the model learned something about how the circuit behaves in general, not just overfit to specific waveforms. ESR is not the right metric for evaluating that kind of generalisation on a nonlinear effect.
+
+---
+
+## Literature review: next experiments
+
+A review of relevant papers suggests three root causes for the held-out failure and a priority order for addressing them.
+
+### 1. Loss function
+
+The current loss is pre-emphasised ESR with coefficient 0.95. Two changes are warranted before any architecture experiments.
+
+**Pre-emphasis coefficient.** Wilczek et al. (DAFx 2022) use H(z) = 1 - 0.85z^-1 as the distortion-specific pre-emphasis filter, citing Wright et al. as the source. The 0.95 value was inherited from the Moog runs and is too mild for broadband harmonic content. Change the coefficient in `tensor_torch_distortion.py`.
+
+**DC loss term.** Pre-emphasis strips low frequencies before ESR is computed, making DC drift invisible to the training signal. Wilczek et al. add an explicit DC loss term: EDC = (mean(target - pred))^2 / mean(target^2). This is a small addition and prevents bias accumulation.
+
+**Multi-resolution STFT loss.** Comunita, Steinmetz et al. (ICASSP 2023) train all distortion and fuzz models with L = L1 + MR-STFT (alpha=1). This directly addresses the gap between "spectrogram looks fine, ESR is bad": the MR-STFT term scores log-magnitude at multiple FFT sizes and is phase-insensitive, matching what the spectrogram already shows. Use `auraloss.freq.MultiResolutionSTFTLoss`. This is the highest-leverage single change.
+
+### 2. Diagnosing the held-out gap
+
+The bench ESR failure (+1.1 dB, worse than silence) has two plausible causes that are currently indistinguishable: training-distribution mismatch and aliasing. A diode clipper folds harmonics above Nyquist back into the audible band; if the model's internal nonlinearities alias, the output can look spectrally similar but be phase-incoherent with the target, exactly reproducing the observed symptom.
+
+**Aliasing-to-Signal Ratio (ASR).** Sato and Smith (DAFx 2025) introduce this metric to quantify aliasing independently of modeling accuracy. Adding ASR to `eval_distortion.py` would determine whether aliasing is a significant contributor before committing to an architectural fix.
+
+**Anti-aliasing via fine-tuning.** If ASR confirms aliasing is significant, Carson, Wright, and Bilbao (DAFx 2025) describe a teacher-student fine-tuning approach where alias-free targets are generated by spectral filtering and the existing trained model is fine-tuned against them. Outperforms 2x oversampling and requires no architecture changes. This works directly on the existing GRU model.
+
+**Smoother activations.** As a cheaper alternative, Sato and Smith show that replacing standard activations (tanh) with smoother variants reduces aliasing with no structural changes.
+
+### 3. Exposure bias on long sequences
+
+Peussa et al. (DAFx 2021) formally describe exposure bias in recurrent audio models: the network is trained on approximately ground-truth state trajectories via TBPTT but at inference must maintain valid state over arbitrarily long sequences. The current 8192-sample training windows are about 170 ms; bench is several minutes. State errors compound over sequences the model has never seen during training.
+
+The existing warmup partially mitigates this but does not address long-sequence drift. The practical experiment: retrain with much longer windows (32k or 65536 samples) and compare held-out bench. If the gap closes, exposure bias was a significant factor.
+
+### 4. Architecture alternatives
+
+**GCN (gated temporal convolutional network).** Comunita et al. benchmark a two-block, nine-layer-per-block dilated GCN with kernel size 3 and dilation growth of 2 (GCN-3, 32k parameters, ~46ms receptive field). For a static diode clipper this architecture matches GRU accuracy with no recurrent dependency, which raises the polyphony ceiling substantially. RTNeural supports dilated Conv1d natively. Simionato and Fasciani (EURASIP 2025) confirm LSTM and GRU outperform SSMs and LRUs for distortion specifically, so GCN-3 is the natural comparison target rather than LRU variants.
+
+**TFiLM (time-varying FiLM) for sag behaviour.** Comunita et al. show that plain GCN fails on fuzz (attack/release time constants of hundreds of ms) while GCN-TF-3 halves the error by adding a small LSTM per conv layer operating on max-pooled activations at block size 128. If the pedal exhibits sag or envelope-following behaviour visible in the spectrogram of a sustained loud note, TFiLM is the targeted fix.
+
+**ODENet.** Wilczek et al. achieve comparable accuracy to LSTM-8 using a 127-parameter MLP derivative network integrated with a numerical solver. Parameters are sparse but training is slow and inference requires a custom ODE integrator not present in RTNeural. Worth revisiting for a future deployment where polyphony is the bottleneck and the pipeline can support custom inference.
+
+### Recommended order
+
+1. Adopt MR-STFT + L1 loss and update pre-emphasis to 0.85 with DC term. Retrain dist_05 configuration.
+2. Add ASR to `eval_distortion.py` to determine whether aliasing is contributing to the held-out gap.
+3. If ASR is high: apply teacher-student fine-tuning (Carson et al. 2025).
+4. If ASR is low but held-out ESR is still bad: retrain with longer windows to address exposure bias.
+5. Replace architecture with GCN-3 as a parallel polyphony-focused track once a strong perceptual baseline exists.
+
+---
+
+## Run dist_07 setup: MR-STFT + L1 loss
+
+**Hypothesis.** The held-out bench failure (positive ESR, good spectrogram) reflects the loss function scoring what is easy to fit rather than what matters perceptually. ESR penalises waveform-level phase error on content the model has never seen. Switching to L1 + MR-STFT aligns the training objective with what the spectrogram already confirms the model can learn: spectral character and saturation behaviour.
+
+**Changes from dist_05.**
+
+The `esr_loss` and `pre_emphasis` functions were removed. The replacement is a `combined_loss` that returns L1 + MR-STFT with equal weighting (alpha=1), following Comunita et al. (ICASSP 2023). The `auraloss.freq.MultiResolutionSTFTLoss` object is constructed once at module level with FFT sizes of 2048, 1024, and 512 samples and matching hop and window lengths, sized for 48kHz audio. Because auraloss expects (batch, channels, time) and the model outputs (batch, time, 1), a transpose is applied inside `combined_loss` before both loss terms. The epoch log now prints the L1 and MR-STFT components separately so both can be tracked independently.
+
+`CELL` is set back to `'gru'` to match dist_05. Architecture and all other hyperparameters are unchanged: GRU 128 units, window 8192, warmup 256, same PAIRS, same seed.
+
+**What to watch.** The combined val loss is on a different scale than the previous ESR values and cannot be directly compared. The meaningful comparison is the bench spectrogram and ESR from `eval_distortion.py` against the dist_05 baseline. If MR-STFT loss on the val split tracks downward across epochs without the L1 term diverging, the model is learning spectral character rather than memorising waveforms.
+
+---
+
+## NaN debugging: MR-STFT instability
+
+Three rounds of NaN failures occurred before a stable training configuration was reached.
+
+### Failure 1: unguarded log in installed auraloss (epoch 4)
+
+Training NaN'd at epoch 4 with the initial configuration (LR 1e-3, clip 1.0):
+
+```
+Epoch 3/300 - loss: 2.0789 (mae 0.0637 mrstft 2.0153) - val: 2.0238
+Epoch 4/300 - loss: 1.8083 (mae 0.0638 mrstft 1.7445) - val: nan (mae nan mrstft nan)
+Epoch 5/300 - loss: nan (mae nan mrstft nan) - val: nan (mae nan mrstft nan)
+```
+
+Val went NaN while train epoch 4 was still finite, indicating the model weights were corrupted by a batch near the end of that epoch. The cause was a missing epsilon in `STFTMagnitudeLoss.forward` in the installed auraloss package: `torch.log(x_mag)` with no floor produces `-inf` when any STFT magnitude bin is zero, which propagates as NaN through backprop. The installed version predated the `log_eps` parameter added in a later commit. Fixed by patching the installed file to `torch.log(x_mag + 1e-7)`.
+
+A second unguarded operation in the same version was `SpectralConvergenceLoss.forward`, which divides `torch.norm(y_mag - x_mag, p="fro")` by `torch.norm(y_mag, p="fro")` with no epsilon on the denominator. Also patched to `.clamp(min=1e-7)`.
+
+### Failure 2: gradient explosion (epoch 14)
+
+After patching auraloss, NaN returned at epoch 14:
+
+```
+Epoch 13/300 - loss: 1.8378 (mae 0.0729 mrstft 1.7649) - val: 1.7472
+Epoch 14/300 - loss: 1.7279 (mae 0.0715 mrstft 1.6564) - val: nan (mae nan mrstft nan)
+Epoch 15/300 - loss: nan (mae nan mrstft nan) - val: nan (mae nan mrstft nan)
+```
+
+Same pattern: train epoch 14 is finite, val is NaN. The auraloss patches were confirmed present in the installed file. The source was gradient explosion in the model itself. The MR-STFT loss runs at a scale of approximately 1.7 versus the old ESR loss of approximately 0.02, so the effective gradient magnitude was roughly 85x larger than the LR and clip norm were calibrated for. A single batch with an unusually large gradient pushed weights to inf, corrupting all subsequent steps. Fixed by lowering LR from 1e-3 to 3e-4 and gradient clip norm from 1.0 to 0.5.
+
+### Failure 3: spectral convergence blow-up (epoch 161)
+
+With reduced LR and clip norm, training ran stably for 160 epochs before NaN returned:
+
+```
+Epoch 159/300 - loss: 0.4785 (mae 0.0101 mrstft 0.4684) - val: 0.4558
+Epoch 160/300 - loss: 0.4785 (mae 0.0101 mrstft 0.4683) - val: 0.4950
+Epoch 161/300 - loss: nan (mae nan mrstft nan) - val: nan (mae nan mrstft nan)
+```
+
+This time both train and val went NaN on the same epoch, meaning the NaN hit on one of the very first batches of epoch 161 and poisoned the entire training accumulation. The model had not degraded in the previous epoch; the trigger was a specific batch drawn by the shuffle at the start of epoch 161.
+
+The cause is the SpectralConvergence term: `||y_mag - x_mag||_F / ||y_mag||_F`. If a shuffled batch contains a near-silent target window, `||y_mag||_F` approaches zero. Even with the denominator clamped at 1e-7, the ratio can reach values on the order of 1e6 when the numerator is finite and the denominator is clamped. This creates a loss spike that gradient clipping cannot fully contain, corrupting the weights irreversibly in one step. Because the shuffle changes each epoch, this event occurs stochastically rather than deterministically.
+
+Notably, the GitHub version of auraloss does not fix this. The installed version already has `torch.clamp(..., min=self.eps)` in `stft()` and the denominator patch applied in Failure 1. The SpectralConvergence term is structurally unbounded for quiet content regardless of patching.
+
+### Resolution
+
+The auraloss dependency was removed entirely. MR-STFT is now implemented inline in `tensor_torch_distortion.py` using `torch.stft` directly with `clamp(min=1e-8)` before the log. The SpectralConvergence term is excluded. Only log-magnitude L1 is summed across the three resolutions. This is consistent with Comunita et al. (ICASSP 2023), whose loss description does not require the SC term, and with Yamamoto et al. (2019), whose ablations show log-magnitude drives the majority of the improvement.
+
+---
+
+## Run dist_07 results
+
+Training completed in 153 epochs (early stop, patience 40). Best val_loss 0.3592 at epoch 113. LR stepped from 3e-4 to 1.5e-4 around epoch 119 with no further improvement.
+
+| Pair | Split | dist_05 ESR | dist_07 ESR |
+|------|-------|-------------|-------------|
+| bench | held-out | 1.1 dB | 1.1 dB |
+| bench-10dB | held-out | 1.4 dB | 1.4 dB |
+| giga | train | -18.6 dB | -15.0 dB |
+| giga-10dB | train | -16.6 dB | -10.4 dB |
+
+Held-out ESR is unchanged. Training ESR is worse by 3 to 6 dB. Both results are expected: the model is no longer optimising waveform fidelity so ESR on training data degrades, and waveform-level ESR was never the intended measure of improvement on held-out content.
+
+The bench spectrogram comparison shows a clear qualitative difference. The dist_07 output has fewer clear spots above 200 Hz and less structured streak artifacts in the mid range, indicating the model captures the spectral character of the distortion more accurately on unseen content. This is the intended benefit of switching to MR-STFT loss.
+
+However, the difference spectrogram shows brighter regions below approximately 30 Hz. This is a DC and sub-bass error that MR-STFT does not adequately penalise. In log-magnitude STFT, very low frequency bins contain little energy and contribute minimally to the loss even when the absolute error there is non-trivial. The Wilczek et al. (DAFx 2022) DC loss term addresses this directly by penalising the mean difference between prediction and target independently of the STFT:
+
+```
+E_DC = (mean(target - pred))^2 / mean(target^2)
+```
+
+---
+
+## Run dist_08 setup: DC loss term
+
+**Hypothesis.** The sub-30 Hz error visible in the dist_07 diff spectrogram reflects a mean-offset drift that MR-STFT cannot penalise. Log-magnitude STFT bins at very low frequencies carry minimal energy, so DC bias accumulates without gradient pressure. Adding the Wilczek et al. (DAFx 2022) DC term alongside the existing L1 + MR-STFT loss should close this gap without disturbing the spectral objective.
+
+**Changes from dist_07.** A `dc_loss` function was added returning `mean(t - p)^2 / (mean(t^2) + eps)`, summed into `combined_loss` with weight 1. All other hyperparameters and architecture unchanged.
+
+**NaN at epoch 9.** Training NaN'd at the start of epoch 9 with the dist_07 stability settings (LR 3e-4, clip 0.5). The pattern -- both train and val NaN simultaneously -- indicates weight corruption during a bad batch at the end of epoch 8, not during validation. Root cause is the same gradient explosion seen in dist_07 Failure 2: the DC term adds a small but correlated gradient on top of what was already near the stability threshold, pushing certain batches over. Fixed by lowering LR to 1e-4 and clip norm to 0.3.
+
+---
+
+## Run dist_08 results
+
+Training completed in 236 epochs (early stop, patience 40). Best val_loss 0.3616 at approximately epoch 196. The DC term settled to 2--5e-4 in the final epochs, confirming it was active but providing minimal gradient signal.
+
+Best val_loss 0.3616 vs dist_07's 0.3592: effectively equivalent at the combined loss level. The bench spectrogram comparison shows dist_08 is marginally worse than dist_07, with slightly more bright spots visible. Sub-30 Hz error was not measurably reduced.
+
+**Analysis.** The DC term did not improve on dist_07. Two factors contributed. First, the term produced near-zero values throughout training, meaning there was no significant DC drift for it to correct. Second, the NaN issue forced a reduction from LR 3e-4 to 1e-4, which converged to a slightly worse local minimum than dist_07 despite reaching a comparable combined loss value. The LR reduction is the most likely cause of the marginal quality decrease.
+
+**Conclusion.** The DC loss term provides no measurable benefit for this model and data combination. dist_07 remains the best model. The sub-30 Hz error in dist_07's diff spectrogram is real but not significant enough to drive a useful gradient signal through this loss formulation.
+
+**Citation note (for paper writeup).** The exact formula is from Wilczek, Wright, Valimaki and Habets, "Virtual Analog Modeling of Distortion Circuits Using Neural Ordinary Differential Equations," DAFx 2022, equation (5). Wilczek et al. credit the combined pre-emphasised ESR + DC loss to earlier work in the Wright/Damskagg/Valimaki lineage (their references [5-8], which trace back to Wright, Damskagg, Valimaki, "Real-time black-box modelling with recurrent neural networks," DAFx 2019). When citing in the paper, attribute the formula to Wilczek 2022 eq. (5) and the broader practice to Wright et al. 2019.
+
+Next run (dist_08): add E_DC as an additive term to the existing combined loss.
+
+---
+
+## ASR implementation and three-way model comparison
+
+**Motivation.** The held-out bench gap in dist_07 (positive ESR with qualitatively good spectrogram) could be caused by either training-distribution mismatch or aliasing, and the existing metrics cannot distinguish them. A diode clipper generates harmonics above Nyquist; if the model's internal nonlinearity produces aliased components, the output spectrum is similar in character to the target but phase-incoherent with it, which matches the observed symptom exactly. Sato and Smith ("Aliasing Reduction in Neural Amp Modeling by Smoothing Activations," DAFx 2025) introduce the Aliasing-to-Signal Ratio (ASR) as a metric that quantifies aliasing independently of modeling accuracy. Adding it to the eval pipeline gives a way to confirm or rule out aliasing as a contributing factor before committing to an architectural fix.
+
+**Implementation.** `python/eval_asr.py` feeds clean sine inputs at 500, 1000, 2000, 4000, and 8000 Hz through the model at amplitude 0.5 for 4 seconds at 48 kHz. The first 0.5 s of output is discarded to cover GRU warmup and any settling transient. The remaining signal is passed to Welch's method (FFT size 32768, 50% Hann overlap), giving 1.46 Hz frequency resolution. FFT bins within +/-3 bins of an integer harmonic of f0 are tagged as signal; everything above 30 Hz that is not a signal bin is tagged as alias; bins below 30 Hz are excluded to skip DC and sub-bass noise. ASR is reported as 10 log10(E_alias / E_harm), with more negative values indicating less aliasing. Output is written to `<eval_dir>/asr_log.txt`, `asr_summary.txt`, and `asr_spectra.png`.
+
+**Results.**
+
+| Test freq | dist_05 (ESR) | dist_07 (MR-STFT) | dist_08 (MR-STFT+DC) |
+|-----------|---------------|--------------------|----------------------|
+| 500 Hz    | -43.0         | -43.1              | -43.5                |
+| 1000 Hz   | -43.4         | -43.5              | -43.6                |
+| 2000 Hz   | -43.0         | -43.5              | -43.6                |
+| 4000 Hz   | -42.6         | -43.4              | -43.5                |
+| 8000 Hz   | -21.1         | **-39.6**          | -21.0                |
+| mean      | -38.6         | -42.7              | -39.0                |
+
+All three models are clean at 500 to 4000 Hz (around -43 dB across the board). The discriminating frequency is 8000 Hz, where dist_07 produces 18 dB less aliasing than either dist_05 or dist_08. The 8000 Hz case is the most informative because at this f0 only two harmonics (8 kHz and 16 kHz) fit below the 24 kHz Nyquist limit, so every higher harmonic the nonlinearity generates folds back into the audible band as aliasing.
+
+**Interpretation.** MR-STFT loss is implicitly reducing aliasing at high frequencies. This is consistent with the loss structure: it penalises spectral energy in places it should not be, and aliased components are exactly that. The dist_07 vs dist_05 comparison isolates the cause: same data, same architecture, only the loss changed, and ASR at 8 kHz improved by 18 dB.
+
+The dist_08 regression is more surprising. dist_08 was trained with the same loss as dist_07 plus a DC term, but its aliasing profile reverted to dist_05's level. The most likely cause is the LR reduction from 3e-4 to 1e-4 that was forced by NaN instability when the DC term was added. The slower optimisation appears to have settled into a different local minimum that achieves equivalent combined val loss without dist_07's aliasing suppression. This is the third negative result for the DC term experiment, following the marginal spectrogram regression and the lack of measurable DC drift during training.
+
+**Conclusion.** dist_07 remains the best model and is now the canonical baseline. Anti-aliasing fine-tuning (Carson, Wright, Bilbao, "Anti-aliasing of neural distortion effects via model fine tuning," DAFx 2025) drops to lower priority: MR-STFT is already providing most of what teacher-student fine-tuning would deliver. The remaining held-out bench gap (+1.1 dB ESR) is now confirmed not to be an aliasing issue, which leaves exposure bias as the next-most-likely contributor (Peussa, Damskagg, Sherson, Mimilakis, Juvela, Gotsopoulos, Valimaki, "Exposure Bias and State Matching in Recurrent Neural Network Virtual Analog Models," DAFx 2021). The model has only been trained on 8192-sample windows (about 170 ms), but bench is several minutes long, so state errors compound over sequences the network has never seen during training. The next experiment is to retrain dist_07's configuration with substantially longer windows (32k or 65536 samples) and re-evaluate held-out bench.
+
+---
+
+## Run dist_09 setup: longer training windows
+
+**Hypothesis.** Exposure bias (Peussa et al. DAFx 2021) is the remaining candidate after ASR ruled out aliasing. The dist_07 GRU was trained on 8192-sample windows (about 170 ms), but bench is several minutes long. At inference the network must maintain a coherent hidden state over spans roughly 1000x longer than anything it saw during training, so small per-sample state errors can compound across hundreds of thousands of samples that were never under gradient pressure. Training with substantially longer windows should mitigate this by forcing the GRU to keep its state consistent across longer horizons.
+
+**Changes from dist_07.** Only `window_size` changed: 8192 to 32768 (about 683 ms, 4x longer). Batch size reduced from 64 to 32 to fit GPU memory. Loss, model, warmup, LR (3e-4), clip norm (0.5), and val split are all identical to dist_07. Total audio is unchanged, so the model sees the same data, just split into fewer, longer chunks.
+
+---
+
+## Run dist_09 results
+
+Training completed in 49 minutes (133 epochs, early stopped, patience 40). Best val_loss 0.3619 at approximately epoch 93. Per-epoch time was 22 s vs dist_07's 6 s (~4x slower due to longer sequences) but with 4x fewer windows per epoch, giving roughly equivalent total compute. No instability.
+
+Best val_loss is essentially identical across all three runs (dist_07: 0.3592, dist_08: 0.3616, dist_09: 0.3619). Val loss is not the discriminating metric here because val windows are also 32k samples in dist_09, so the model is matched to its own training regime. The meaningful test is held-out bench.
+
+| Pair       | Split    | dist_05 | dist_07 | dist_09 |
+|------------|----------|---------|---------|---------|
+| bench      | held-out | 1.1     | 1.1     | 1.4     |
+| bench-10dB | held-out | 1.4     | 1.4     | 1.3     |
+| giga       | train    | -18.6   | -15.0   | -8.3    |
+| giga-10dB  | train    | -16.6   | -10.4   | -9.2    |
+
+| Test freq | dist_07 | dist_09 |
+|-----------|---------|---------|
+| 500 Hz    | -43.1   | -42.2   |
+| 1000 Hz   | -43.5   | -43.1   |
+| 2000 Hz   | -43.5   | -43.5   |
+| 4000 Hz   | -43.4   | -42.0   |
+| 8000 Hz   | -39.6   | -31.6   |
+| mean      | -42.7   | -40.5   |
+
+**Bench is statistically flat across all three runs.** Held-out ESR moved from +1.1 dB to +1.4 dB at full level and from +1.4 dB to +1.3 dB at -10 dB, within run-to-run noise. The exposure-bias hypothesis predicted that 4x longer training windows would reduce drift on the multi-minute bench file. They did not.
+
+**Train ESR regressed by 5 to 7 dB.** This is consistent with longer windows forcing a more "generalist" optimisation that no longer overfits short-window patterns. Combined with 4x fewer gradient updates per epoch, this is what you would expect if exposure bias mitigation were trading train fidelity for held-out generalisation. Since bench did not improve, the trade produced no net benefit.
+
+**ASR at 8 kHz regressed by 8 dB** (-31.6 vs -39.6). Low/mid frequencies unchanged. Same explanation: fewer effective gradient updates means slightly less precise high-frequency learning. Still well above dist_05's -21 dB so the broader MR-STFT win is preserved.
+
+**Analysis.** Three hypotheses were on the table for the held-out bench gap after the literature review: aliasing, exposure bias, and training-data diversity. ASR ruled out aliasing. dist_09 now rules out exposure bias. Training-data diversity is the only remaining hypothesis and is not testable with another training run on the existing data. Wilczek et al. (DAFx 2022) used 8 minutes of mixed guitar and bass for their diode clipper models; GigaTestAudio is 17 minutes but the timbral diversity within it may still be the limit on what the model can generalise to.
+
+**Conclusion.** dist_07 remains the canonical distortion model. All training-loop experiments have been exhausted as candidates for closing the bench gap. Three branches remain: ship dist_07 as the final opcode weights and move toward the Csound paper writeup, record more diverse pedal data and retrain, or pivot to architecture (GCN-3 per Comunita, Steinmetz, Phan, Reiss "Modelling Black-Box Audio Effects with Time-Varying Feature Modulation," ICASSP 2023) for polyphony gains independent of bench accuracy.
+
+---
+
+## Opcode deployment: dist_07
+
+Updated `distnn` to load `models/dist_07_gru128_mrstft/weights.json` in place of dist_05. Files modified:
+
+- `csound/test_distnn.csd` (file-playback example)
+- `csound/test_midi_distnn.csd` (preload call and per-note distnn calls)
+- `README.md` Distortion opcode section (model path, training loss noted, ASR result added to caveats)
+
+The MR-STFT loss change (Comunita, Steinmetz, Phan, Reiss "Modelling Black-Box Audio Effects with Time-Varying Feature Modulation," ICASSP 2023) is the load-bearing improvement: visibly cleaner bench spectrogram and 18 dB less aliasing at 8 kHz per ASR. Held-out ESR is unchanged at +1.1 dB but the metric is already documented as a poor fit for nonlinear effect generalisation.
+
+---
+
+## C++ loader bug: JSON key prefix mismatch
+
+First attempt to load dist_07 in the opcode crashed at note-on (signal 22). Root cause: `model_distortion.py` was refactored during dist_06 to rename `self.gru` to `self.rnn` (so an LSTM variant could be selected via a `cell` parameter), so all training runs from dist_06 onward export JSON keys with the `rnn.*` prefix. The C++ loader in `src/csound_opcode/distnn.cpp` was hardcoded to look for `gru.*` keys per the dist_05 convention, so `RTNeural::torch_helpers::loadGRU` silently failed to populate the weights and the model evaluated with uninitialised state.
+
+Fixed by changing the key prefix in `distnn.cpp` from `"gru."` to `"rnn."` and rebuilding via `cmake --build build --config Release --target distnn`. `eval_distortion.py` was already doing this remap transparently with `state = {k.replace('gru.', 'rnn.'): v for k, v in state.items()}`, which is why eval pipelines worked across both vintages but the opcode did not. The legacy dist_05 weights file is no longer loadable by the rebuilt opcode; if needed, it would have to be re-exported with the key prefix renamed back to `gru.*`.
+
+`moognn.cpp` is unaffected. The Moog models (`model_concat.py`, `model_film.py`) still use `self.gru`, so their JSON keys match the `gru.*` prefix the Moog opcode expects.
+
+---
+
+## Opcode performance benchmarking: plan
+
+**Goal.** Quantify the cost and real-time correctness of the deployed opcodes, and produce one headline figure plus one headline table for the Csound paper. The benchmarking is not a deliverable on its own; it exists to answer two questions the reader will have: "what does it cost to use a neural network instead of native DSP?" and "where on the cost / accuracy frontier do the deployed models sit?"
+
+**Scope discipline.** Limit measurements to what supports those two questions. Skip table-stakes data that does not advance the argument: cross-sample-rate sweeps, JSON load timing, libtorch / ONNX comparisons (the latter already covered by Chowdhury "RTNeural: Fast Neural Inferencing for Real-Time Systems," arXiv 2021).
+
+### Test rig
+
+| Component  | Spec |
+|------------|------|
+| CPU        | AMD Ryzen 5 5600X |
+| OS         | Windows |
+| Compiler   | MSVC (exact version recorded at run time) |
+| Build type | Release with current CMake config |
+| Csound     | Version recorded at run time |
+| Power plan | High Performance (CPU boost variability suppressed) |
+
+All headline measurements taken on this machine. If included, M1 results appear only as a single-row footnote in the headline table; cross-architecture comparison is out of scope.
+
+### Measurement matrix
+
+| Target | Sweep | Output metric |
+|--------|-------|---------------|
+| moognn at GRU 32 / 64 / 128 / 256 units | single voice, 60 s offline render | samples/sec |
+| RKSimulationModel (native DSP Moog ladder) | single channel, 60 s synthetic input | samples/sec |
+| moognn (deployed 128u) | polyphony 1 to failure | samples/sec per voice count |
+| distnn (deployed 128u) | polyphony 1 to failure | samples/sec per voice count |
+| distnn (deployed), polyphony = cliff - 1 | per-block timing log over 60 s | mean / p99 / max ms per ksmps block |
+
+Each measurement repeated N=5 times; median reported.
+
+**Why moognn only for the frontier.** GRU cost per sample is determined by `(input_dim + hidden_dim) x hidden_dim x 3` matrix multiplies. moognn and distnn differ only by one GRU input channel (knob vs no knob), which is 0.7% of operations at 128 units. distnn cost tracks moognn within 1% at matched hidden size. Stating the equivalence in the paper saves the redundant measurement.
+
+**Why no DSP baseline for distnn.** The distortion model targets a hardware breadboard pedal, not a digital algorithm. There is no native DSP reference to compare against. distnn appears in the polyphony and jitter measurements only.
+
+### Trained models needed
+
+| GRU size | Existing | To train |
+|----------|----------|----------|
+| 32       | no       | yes      |
+| 64       | run 16   | no       |
+| 128      | run 19   | no       |
+| 256      | no       | yes      |
+
+Both new runs use the same training config as run 19, varying only `GRU_HIDDEN`. Approximately 30 minutes total training time. ESR is evaluated on the same standard bench cutoff grid as the existing runs so the four points share an x-axis on the frontier plot.
+
+### Build sequence
+
+1. Create `bench/` directory with `bench/results/` for raw output and figures.
+2. Write `bench_dsp.cpp`: wrap `RKSimulationModel` from `vendor/MoogLadders/` in a tight per-sample processing loop matching the opcode's interface. Compile as a separate CMake target alongside `moogGen`.
+3. Write `bench_opcode.csd`: parameterised score template using Csound macros for opcode name, weights path, polyphony count, and duration. Offline render via `-o file.wav`.
+4. Write `bench/run_benchmarks.py`: driver that invokes Csound and the DSP binary via subprocess, times each invocation with `time.perf_counter()`, appends to `bench/results/raw.csv`.
+5. Train moognn at 32 and 256 units (`models/25_moog_100-20k_32u/`, `models/26_moog_100-20k_256u/` or equivalent). Evaluate ESR on standard cutoffs.
+6. Run the full measurement matrix.
+7. Write `bench/plot_results.py`: read `raw.csv`, generate `cost_frontier.png` (moognn at four sizes plus DSP baseline) and `headline_table.md`.
+8. Extract the jitter sentence from the per-block timing log.
+9. Append the results section to DEVLOG2.md.
+
+### Headline outputs
+
+1. **`cost_frontier.png`.** Scatter or line plot. X-axis: ESR (dB) on standard bench cutoff grid. Y-axis: samples/sec at single voice. Four moognn points, one horizontal reference line or annotated point for the DSP baseline. Deployed model size annotated.
+2. **`headline_table.md`.** Rows for moognn (deployed 128u) and distnn (deployed 128u). Columns: single-voice samples/sec, max sustainable polyphony at 48 kHz / ksmps=64, memory per voice. Reproducibility footnote referencing the rig spec.
+3. **Jitter sentence.** One line in prose summarising the per-block timing distribution at near-cliff polyphony. Confirms or flags real-time correctness.
+
+### Reproducibility
+
+`bench/README.md` documents the test rig spec, exact build steps, and how to reproduce all numbers from a fresh checkout. Anything that varies run-to-run (CPU boost residual variance, background processes, Windows scheduler decisions) is documented as a caveat. The csv at `bench/results/raw.csv` is committed so anyone can regenerate the figure without re-running benchmarks.
+
+### Out of scope (deferred)
+
+- Cross-sample-rate / cross-ksmps sweeps. Useful for a deployment guide, not for the paper's argument.
+- M1 / ARM measurements beyond a footnote.
+- libtorch / ONNX runtime comparisons.
+- GCN-3 polyphony comparison. Becomes relevant if and when the GCN-3 pivot is attempted; currently deferred.
+
+## DSP baseline results and Csound moogladder review
+
+### `bench_dsp` results (5600X, k-rate, block=64, sr=48k)
+
+Raw CSV at [bench/results/dsp_5600x_kr.csv](../bench/results/dsp_5600x_kr.csv). Source: [bench/bench_dsp.cpp](../bench/bench_dsp.cpp).
+
+| Voices | wall ms (median) | RTF    | CPU % | voices @ realtime |
+|--------|------------------|--------|-------|-------------------|
+| 1      | 234.0            | 0.0234 | 2.34  | 42                |
+| 2      | 467.8            | 0.0468 | 4.68  | 42                |
+| 4      | 935.7            | 0.0936 | 9.36  | 42                |
+| 8      | 1871.4           | 0.1871 | 18.71 | 42                |
+| 16     | 3744.9           | 0.3745 | 37.45 | 42                |
+| 32     | 7486.1           | 0.7486 | 74.86 | 42                |
+| 64     | 14971.8          | 1.4972 | 149.7 | 42                |
+
+Scaling is perfectly linear (per-voice cost constant across polyphony). Trial-to-trial variance under 0.3%. RKSimulationMoog from [vendor/MoogLadders/](../vendor/MoogLadders/) ceilings at 42 simultaneous voices on this rig.
+
+### Csound moogladder implementation review
+
+Reviewed [vendor/csound/Opcodes/newfils.c](../vendor/csound/Opcodes/newfils.c) (functions `moogladder_init`, `moogladder_process` at lines 66-164) to fact-check the comparison framing.
+
+**What `moogladder` actually does:**
+- Full `tanh` nonlinearity per stage (not linearized)
+- Euler ODE integration with 2x oversampling per audio sample (inner `for (j = 0; j < 2; j++)` loop)
+- Polynomial frequency / resonance correction (`fcr`, `acr`) for tuning accuracy
+- Double precision throughout
+- Implementation matches Huovilainen, "Non-Linear Digital Implementation of the Moog Ladder Filter," DAFx 2004
+
+`moogladder2` (lines 461-541) is the same algorithm with `tanh` replaced by a fast polynomial approximation `TanH()`.
+
+### Implications for the paper framing
+
+The "linearized DSP vs. nonlinear neural" angle does not hold. Both moogladder and RKSimulationMoog use full tanh per stage; both are ODE-based nonlinear models.
+
+The real difference between the two is integration accuracy: Euler with 2x oversampling has O(h^2) local error vs. RK4's O(h^5). Audible divergence concentrates at high cutoff and high resonance where Euler accumulates frequency warping and instability. RKSimulationMoog is the more accurate reference, which retroactively justifies using it as the training target.
+
+Revised framing for the paper:
+1. Lead with **learning-from-data** as the value proposition, not accuracy. The architecture and training pipeline transfer directly to hardware recordings (evidenced by distnn). moogladder cannot.
+2. The accuracy claim becomes secondary and narrower: "our model matches RK4-quality response; moogladder's Euler-2x integration shows measurable error above ~10 kHz cutoff."
+3. moognn is more expensive per voice than both DSP options. State this directly; do not frame the comparison around cost.
+
+### Action items
+
+- Add `moogladder` benchmark to the measurement matrix. Same Csound bench infrastructure planned for moognn polyphony; one extra row in the headline table.
+- Treat `moogladder` as the "what a Csound user would otherwise use" baseline. RKSimulationMoog remains the "accuracy ceiling" baseline.
+- Update README opcode section once benchmark numbers are in to drop any implied accuracy advantage over moogladder without supporting measurement.
+
+## Frontier point: run 24 (32u moognn)
+
+Trained for the CPU vs. accuracy frontier. Same config as run 19, only `GRU_HIDDEN=32`. Eval at [models/25_moog_100-20k_32u/eval/evalOutput.txt](../models/25_moog_100-20k_32u/eval/evalOutput.txt).
+
+| Freq (Hz) | 32u (run 24) | 64u (run 16) | 128u (run 19) |
+|-----------|--------------|--------------|---------------|
+| 100       | -31.2        | -34.0        | -34.7         |
+| 250       | -37.9        | -37.3        | -41.9         |
+| 1000      | -39.4        | -42.8        | -46.7         |
+| 4000      | -41.0        | -45.3        | -46.6         |
+| 16000     | -46.1        | -48.2        | -53.7         |
+| 20000     | -44.8        | -46.8        | -52.6         |
+| **mean**  | **-39.7**    | **-42.3**    | **-45.9**     |
+
+Existing eval files for comparison: [models/16_moog_100-20k_64u_w256/eval/evalOutput.txt](../models/16_moog_100-20k_64u_w256/eval/evalOutput.txt), [models/19_moog_100-20k_128u_w256/eval/evalOutput.txt](../models/19_moog_100-20k_128u_w256/eval/evalOutput.txt).
+
+Frontier spacing: 32→64 = +2.6 dB, 64→128 = +3.6 dB mean ESR improvement. Clean diminishing-returns curve. All cutoffs pass the "good" threshold even at 32u. Low cutoffs (100-250 Hz) are the weakest band across all sizes; long time constants are harder to maintain with smaller GRU state. 256u (run 25) in progress and expected to fill the top of the curve.
+
+## Benchmark infrastructure: complete
+
+All tooling is built and tested. Awaiting run_25 training completion and an idle machine window to run the full matrix.
+
+### Harness components
+
+| File | Purpose |
+|------|---------|
+| [bench/bench_dsp.cpp](../bench/bench_dsp.cpp) | Standalone C++ binary, RKSimulationMoog. `--cutoff-mode kr` matches opcode k-rate dispatch; `--cutoff-mode ar` matches sweep_ref per-sample updates. |
+| [bench/bench_opcode.csd](../bench/bench_opcode.csd) | Parameterised Csound score. Macros: `INSTR` (1=moognn, 2=distnn, 3=moogladder), `VOICES`, `DUR`, `WEIGHTS`. Spawns N simultaneous voices via `schedule` at t=0; self-terminates via `event "e"` after `$DUR` seconds. |
+| [bench/run_benchmarks.py](../bench/run_benchmarks.py) | Driver: iterates the measurement matrix, wraps each Csound invoke with `time.perf_counter()`, drops slowest trial, writes `bench/results/opcode.csv`. |
+| [bench/plot_results.py](../bench/plot_results.py) | Reads `opcode.csv` + `dsp_5600x_kr.csv` + `evalOutput.txt` files; generates `cost_frontier.png`, `polyphony_plot.png`, `headline_table.md`. Runs with partial data (skips missing configs gracefully). |
+| [bench/README.md](../bench/README.md) | Rig spec, build steps, full flag reference for all four tools, CSV schema, measurement caveats. |
+
+### Design decisions
+
+`bench_opcode.csd` uses `event "e", 0, 0` from within the spawner instrument to terminate performance after `$DUR` seconds rather than relying on `f 0 N` in the score. Score macros (`--omacro`) do not expand in the `<CsScore>` section; duration control must live in the orchestra.
+
+Timing includes Csound startup (~100 ms JSON parse). At `--dur 10` this is under 1% of total wall time and is consistent across all opcode runs, so it does not affect relative comparisons.
+
+moogladder is included in the opcode matrix (INSTR=3) to serve as the "what a Csound user would otherwise use" baseline. It benchmarks through the same Csound path as the neural opcodes, giving a fair apples-to-apples cost comparison. See the moogladder source review above (Huovilainen DAFx 2004) for implementation context.
+
+### ESR values ready for plotting
+
+Parsed from static bench eval outputs:
+
+| Label | Mean ESR (dB) | Eval file |
+|-------|---------------|-----------|
+| moognn_32u | -39.6 | [models/25_moog_100-20k_32u/eval/evalOutput.txt](../models/25_moog_100-20k_32u/eval/evalOutput.txt) |
+| moognn_64u | -42.3 | [models/16_moog_100-20k_64u_w256/eval/evalOutput.txt](../models/16_moog_100-20k_64u_w256/eval/evalOutput.txt) |
+| moognn_128u | -45.9 | [models/19_moog_100-20k_128u_w256/eval/evalOutput.txt](../models/19_moog_100-20k_128u_w256/eval/evalOutput.txt) |
+| moognn_256u | -47.9 | [models/26_moog_100-20k_256u/eval/evalOutput.txt](../models/26_moog_100-20k_256u/eval/evalOutput.txt) |
+
+### Remaining steps
+
+1. Finish run_25 (256u) training and evaluate on standard bench grid.
+2. Run `python bench/run_benchmarks.py` on idle machine (no training in parallel). Estimated 15-20 min.
+3. Run `python bench/plot_results.py` to generate paper figures.
+4. Write results section in DEVLOG2.md with final numbers.
+5. Update README.md opcode section with confirmed polyphony ceilings.
+
+---
+
+## Bench harness review fixes
+
+Pre-benchmark review of the harness surfaced four small issues:
+
+1. `bench_dsp.cpp` used `std::sinf`, a non-standard MSVC extension. Replaced with `std::sin` (the float overload in `<cmath>`) so the binary builds on clang/gcc as well.
+2. `plot_results.py` opened files without `encoding="utf-8"`, which on Windows defaults to cp1252 and corrupted the em-dash in `headline_table.md`. Both the ESR read and the table write now specify utf-8.
+3. `RKSimulationMoog` has no public `Reset`, so `bench_dsp` reuses voice state across trials. The Process loop has no state-dependent branches and trial-to-trial variance is under 0.3%, so timing is unaffected. Documented in `bench/README.md` so it does not surprise anyone reading the harness later.
+4. `dsp_5600x_kr.csv` had accumulated three partial runs (48 rows total) because `bench_dsp` opens the CSV in append mode. Deduplicated to one clean run of 28 rows (7 voice counts x 4 trials). The append behaviour is documented but the canonical file is now a single coherent run.
+
+---
+
+## moognn opcode templated across hidden sizes
+
+### The bug
+
+Smoke testing the bench pipeline with `python bench/run_benchmarks.py --only moognn_32u` produced an empty WAV and an opaque "ERROR trial N" from the driver. Direct invocation of Csound revealed the actual cause: `csound command: received signal 11` (SIGSEGV) inside `moognn.dll` when loading the 32u weights.
+
+Root cause: `RTNeural::ModelT` is a compile-time template with fixed layer shapes. `moognn.cpp` baked in `GRULayerT<float, 17, 128>` and `DenseT<float, 128, 1>`, so any model whose hidden size differed from 128 wrote weights into wrong-sized buffers and crashed the GRU constructor. The same crash would have hit run_25 (256u) once training finished.
+
+The driver's error reporting masked it. `run_benchmarks.py` only printed the last 400 chars of stderr, which on a non-zero exit was just the Csound startup banner; the actual signal-11 line appeared earlier and was truncated.
+
+### Fix: template `MoogNN` on hidden size
+
+`moognn.cpp` refactored so `Model` and `MoogNN` take an `int H` template parameter. The conv stage is unchanged (1 to 16 channels, kernel 31, size-independent). `RecurrentStage<H>` and `Model<H>` carry the size through to RTNeural's compile-time shapes. `on_load` registers four opcodes from the same DLL:
+
+```cpp
+csnd::plugin<MoogNN<32>>(csound, "moognn32",  "a", "aSk", csnd::thread::ia);
+csnd::plugin<MoogNN<64>>(csound, "moognn64",  "a", "aSk", csnd::thread::ia);
+csnd::plugin<MoogNN<128>>(csound, "moognn128", "a", "aSk", csnd::thread::ia);
+csnd::plugin<MoogNN<256>>(csound, "moognn256", "a", "aSk", csnd::thread::ia);
+```
+
+Each instantiation gets its own fully-unrolled GRU inference path, so per-size measurement reflects the real deployed inference cost. The shared `moognn_preload` (JSON cache pre-warm) is unchanged.
+
+The deployed name moved from `moognn` to `moognn128` for parallel naming with the other sizes; there is no `moognn` alias.
+
+### Caller updates
+
+- `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` switched to `moognn128`.
+- `bench/bench_opcode.csd` reads a new `$OPCODE` macro (default `moognn128`); instr 1 invokes the size-specific opcode via macro substitution.
+- `bench/run_benchmarks.py` carries an `OPCODE_NAMES` dict that maps each moognn label to its opcode name, passed through as `--omacro:OPCODE=`.
+
+### Smoke test after the refactor
+
+`moognn32` loaded `run_24_32u/weights.json` and rendered cleanly. `moognn128` loaded `run_19/weights.json` and produced the expected output. Single-voice cost at `--dur 2`: 32u 147 ms (rtf 0.073, cpu 7.4%), 128u 739 ms (rtf 0.37, cpu 37%). The ratio is roughly 5x rather than the theoretical 16x because Csound startup and JSON parse are a much larger share of wall time at this duration. The full benchmark uses `--dur 10`, dropping startup to about 5% of wall time. Numbers from the smoke test are sanity-check only, not the final figure.
+
+---
+
+## rkmoog opcode: RKSimulationMoog as a Csound plugin
+
+### Motivation
+
+The existing `bench_dsp.cpp` standalone binary benchmarks `RKSimulationMoog` (RK4, 8x oversampled) outside Csound. That gives a DSP-only floor but includes no opcode dispatch overhead, no Csound scheduler cost, and no MYFLT double-to-float conversion. To get a true apples-to-apples comparison with moognn -- same audio path, same Csound frame dispatch, same k-rate cutoff update -- `RKSimulationMoog` needed its own opcode.
+
+### Implementation
+
+`src/csound_opcode/rkmoog.cpp` wraps `RKSimulationMoog` in a `csnd::Plugin<1, 3>` struct. Signature: `aout rkmoog ain, kcutoff, kresonance`.
+
+Design choices:
+- `init()` allocates one `RKSimulationMoog` on the heap (sample rate from `sr()`, which reads `insdshead->esr`).
+- `aperf()` converts the ksmps block from `MYFLT` (double in Csound 7) to `float`, calls `Process()`, converts back. A `std::vector<float>` scratch buffer avoids per-sample heap alloc.
+- `SetCutoff`/`SetResonance` are only called when the k-rate value actually changes (both multiply by 2*pi internally, so skipping unchanged calls matters under high polyphony).
+- No preload opcode, no JSON, no fade-in. State lives in `RKSimulationMoog::state[4]` and resets to zero on init.
+
+### Bug: nsmps uninitialized in init()
+
+First run crashed with SIGSEGV. The scratch buffer was sized with `nsmps` in `init()`, but the CPOF framework does not set the Plugin's `nsmps` member until `aperf()` fires (via `nsmps_set()`). During `init()`, `nsmps` is uninitialised (zero from Csound's malloc), so `scratch.resize(0)` produced an empty vector. The first `scratch[i]` write in `aperf()` was an out-of-bounds access.
+
+Fix: size the scratch buffer with `insdshead->ksmps` instead, which is valid at init time:
+
+```cpp
+scratch.resize(insdshead->ksmps);
+```
+
+### CMake and bench harness updates
+
+- `rkmoog` added to `CMakeLists.txt` as a shared library; includes `vendor/MoogLadders/src` (no RTNeural dependency).
+- `bench/bench_opcode.csd`: added `--opcode-lib=build/bin/Release/rkmoog.dll`, updated INSTR comment (4=rkmoog), added instr 4 with same log sweep and resonance=0.5 as the training data.
+- `bench/run_benchmarks.py`: added rkmoog polyphony sweep (voices 1, 2, 4, 8, 16) to the matrix.
+- `bench/plot_results.py`: `rkmoog` added to `META`, `POLYPHONY_ORDER`, frontier dotted lines, and headline table.
+
+### Smoke test (--dur 2, 2 trials, Ryzen 5600X)
+
+| Voices | CPU% | Voices at realtime |
+|--------|------|--------------------|
+| 1      | 4.0  | 25                 |
+| 2      | 6.7  | 29                 |
+| 4      | 16.6 | 24                 |
+| 8      | 30.8 | 25                 |
+| 16     | 57.0 | 28                 |
+
+~4% CPU/voice, ~25 voices at realtime on the 5600X. This is expected to be substantially cheaper than moognn_128u (~37% CPU/voice from the same smoke test), confirming that the neural model carries real inference cost over the physics reference. Final numbers will come from the full `--dur 10` run with the machine idle.
+
+
+## New training data and dist_10 (breadboard recordings)
+
+### Recording setup
+
+New distortion recordings made with a physical loopback: dry signal sent from the interface output through the pedal and back into the input simultaneously, so the dry reference captures exactly what entered the hardware. Files saved to `audio/updatedDistortion/`:
+
+| File | Role |
+|------|------|
+| `trainingDry.wav` / `trainingWet.wav` | Training pair (breadboard, 0 dB) |
+| `training-10dBDry.wav` / `training-10dBWet.wav` | Training pair (breadboard, -10 dB) |
+| `benchDry.wav` / `benchWet.wav` | Held-out eval (bench rig, 0 dB) |
+| `bench-10dBDry.wav` / `bench-10dBWet.wav` | Held-out eval (bench rig, -10 dB) |
+
+Alignment check on all four pairs: +-1-2 samples at 48 kHz (expected ADC/DAC offset, not corrected). Compared to the GigaTestAudio recordings, the audio was also volume-normalized for more consistent levels throughout. This means the distortion circuit sees less input-level variation across the recording, which may reduce the dynamic range of behaviour the model needs to learn.
+
+An earlier export had a long tail of silence on each file. This inflated window counts and produced artificially good ESR: during silence the wet is near-zero except for low-frequency breadboard hum, which the model trivially ignores, flattering the metric without reflecting actual distortion accuracy. Files were re-exported with the silence trimmed.
+
+### Training configuration
+
+Identical to dist_07_mrstft: 128 GRU units, MR-STFT + L1 loss, window_size 8192, warmup 256, batch 64, LR 3e-4, clip 0.5, patience 40. Val split is 20% random window shuffle within the breadboard training pairs only; held-out bench is never seen during training. Training script updated to accept GRU hidden size as an optional second CLI argument.
+
+### Results: dist_10_gru128
+
+28 minutes, 300 epochs (no early stop). Best val_loss: 0.3144.
+
+| Pair | Split | ESR (dB) |
+|------|-------|----------|
+| bench | held-out | -5.3 |
+| bench-10dB | held-out | -3.2 |
+| training | train | -6.9 |
+| training-10dB | train | -4.5 |
+
+ASR mean: -42.1 dB (dist_07: -42.7 dB). Aliasing is not a factor.
+
+### Analysis
+
+dist_10 closes the bench gap that plagued dist_07 through dist_09. dist_07 scored +1.1 dB ESR on held-out bench (positive ESR means the error exceeds the signal energy, i.e. the model is worse than silence). dist_10 scores -5.3 dB, indicating real learning on the held-out set. The train-to-held-out gap is also much smaller: dist_07 was -15 dB in-distribution vs +1.1 dB on bench; dist_10 is -6.9 dB in-distribution vs -5.3 dB on bench. The new recordings come from the same physical loopback session and are volume-normalized, so training and eval data share more spectral and dynamic properties than GigaTestAudio and bench did.
+
+In-distribution training ESR (-6.9 dB) is weaker than dist_07's (-15 dB) despite identical architecture and loss. The breadboard circuit has more low-frequency noise and component variation than the bench rig, adding irreducible noise to every training target. Volume normalization reduced distribution mismatch but also compressed the amplitude range seen by the circuit, potentially limiting what the model learns about nonlinear behaviour at different drive levels.
+
+## dist_11_gru64 and 128u size comparison
+
+Trained dist_11 at 64 GRU units on the same breadboard data and config as dist_10. Also retrained 128u (dist_10_gru128_v2) to check whether dist_10's poor result was a bad random initialization.
+
+| Model | GRU | train ESR | bench ESR (held-out) | ASR mean |
+|-------|-----|-----------|----------------------|----------|
+| dist_10_gru128 | 128 | -6.9 | -5.3 | -42.1 |
+| dist_10_gru128_v2 | 128 | -5.9 | -4.6 | -43.0 |
+| dist_11_gru64 | 64 | -22.7 | -25.7 | -41.6 |
+
+The v2 rerun reproduced the poor 128u result, ruling out a bad initialization. 64u outperforms 128u by roughly 20 dB on both training and held-out bench despite using half the capacity. The most likely explanation is that the larger model overfit to minimizing MR-STFT magnitude loss without tracking the waveform, since spectral loss can be satisfied by outputs that match frequency content but not sample-level alignment. The smaller model's lower capacity acts as implicit regularization that prevents this shortcut.
+
+dist_11_gru64 is the primary distortion model going forward. dist_10_gru128_v2 is discarded. The distnn opcode will be updated to deploy the 64u weights.
+
+---
+
+## Runs dist_12 and dist_13: L1 weighting fix
+
+### Hypothesis
+
+The 128u failure was a loss function problem, not a capacity one. MR-STFT is phase-agnostic: it scores log-magnitude only, so a model with enough capacity can satisfy the loss with outputs that match spectral content but not sample-level alignment. In the training logs, MR-STFT runs at roughly 0.74 and L1 at 0.035, a 21:1 ratio. At that imbalance the 128u model learned a phase-incoherent shortcut. The 64u model could not exploit it because its limited capacity forced it to rely on the L1 waveform signal. Adding `L1_WEIGHT=10` to the combined loss raises the L1 contribution from ~5% to ~32% of the total, removing the shortcut for the larger model.
+
+### Training changes
+
+`tensor_torch_distortion.py` updated:
+
+- `l1_weight` added as an optional third CLI argument (default 1.0). Applied as `L1_WEIGHT * l_mae + l_mrstft` in `combined_loss`.
+- When `L1_WEIGHT > 1.0`, LR drops from 3e-4 to 1e-4 and clip norm from 0.5 to 0.3. The higher weighted loss scale raises gradient magnitudes and causes explosion at the original settings, matching the same instability pattern seen in the dist_07 and dist_08 NaN debugging.
+- Gradient NaN skip added to the training loop: after `loss.backward()`, if any gradient is non-finite the optimizer step is skipped and the batch is discarded. This prevents a single bad batch from corrupting the weights irreversibly. The breadboard recordings contain windows where dry and wet have mismatched transients that can produce gradient spikes large enough that the Adam moment estimates amplify them past what clip norm can contain. Skipped batch count is logged per epoch and at training end.
+
+### Results
+
+| Model | GRU | train ESR | bench ESR (held-out) | bench-10dB (held-out) |
+|-------|-----|-----------|----------------------|-----------------------|
+| dist_10_gru128 | 128u | -6.9 | -5.3 | -3.2 |
+| dist_11_gru64 | 64u | -22.7 | -25.7 | -- |
+| dist_12_gru128_l1x10 | 128u | -26.6 | -29.2 | -28.2 |
+| dist_13_gru64_l1x10 | 64u | -22.8 | -26.2 | -24.9 |
+
+### Analysis
+
+dist_12 (128u, L1x10) is the clear winner at -29.2 dB held-out, 3 dB above the previous best (dist_11). The hypothesis is confirmed: the original 128u failure was entirely due to the loss shortcut, not insufficient capacity. With the shortcut removed, the extra capacity pays off as expected.
+
+dist_13 (64u, L1x10) is nearly identical to dist_11 (64u, no L1 weighting): -26.2 vs -25.7 dB on bench, -22.8 vs -22.7 dB on training. The L1 weighting had almost no effect on the smaller model, confirming that its limited capacity was already acting as implicit regularization. The 128u improvement came entirely from capacity that could now be used correctly.
+
+dist_12_gru128_l1x10 is the new primary distortion model. The distnn opcode should be updated to deploy these weights.
+
+---
+
+## Run dist_14 (256 GRU units, L1x10)
+
+Same config as dist_12 (L1_WEIGHT=10, LR=1e-4, clip=0.3, scheduler patience=10). Trained all 300 epochs with no early stopping. LR stepped once from 1e-4 to 5e-5 at epoch 292, meaning the scheduler still fires too late. ~84 seconds per epoch, approximately 7 hours total.
+
+| Model | GRU | bench held-out | bench-10dB | train |
+|-------|-----|---------------|------------|-------|
+| dist_12_gru128_l1x10 | 128u | -29.2 | -28.2 | -26.6 |
+| dist_14_gru256_l1x10 | 256u | -30.2 | -29.2 | -28.2 |
+
+256u beats 128u by 1 dB on held-out bench. Diminishing returns have set in: each unit doubling is now worth roughly 1 dB rather than the 3-4 dB gains seen in the 64u to 128u step. Generalization remains healthy across both models, with held-out matching or exceeding training ESR.
+
+The practical tradeoff: in the Moog filter experiments 256u crackled at 2 voices; the distortion opcode has the same per-sample GRU cost. dist_14 is likely a single-voice model. dist_12 at 128u gives 6-voice polyphony for 1 dB less accuracy. Whether that tradeoff is acceptable depends on the use case.
+
+The LR scheduler still steps too late due to slow val_loss progress at 1e-4. A retrain with more aggressive patience would likely extract additional accuracy from both 128u and 256u without changing the architecture.
+
+---
+
+## Benchmark results (Ryzen 5600X, 48kHz, ksmps=64, Release build)
+
+Full matrix run via `bench/run_benchmarks.py`. Raw data at `bench/results/opcode.csv`.
+
+### Single-voice CPU cost
+
+| Model | CPU% / voice | Voices at realtime |
+|-------|-------------|-------------------|
+| moognn_32u | 5.9% | 16 |
+| moognn_64u | 8.6% | 11 |
+| moognn_128u | 16.9% | 6 |
+| moognn_256u | 60.0% | 1 |
+| distnn_128u | 16.5% | 6 |
+| rkmoog (RK4 reference) | 2.6% | 39 |
+| moogladder (Csound built-in) | 0.7% | 141 |
+
+moognn_128u and distnn_128u cost the same to within 0.4 percentage points. The GRU input difference (17 channels for moognn vs 16 for distnn) is negligible at 128 hidden units, as expected.
+
+### moognn_128u and distnn_128u polyphony
+
+| Voices | moognn CPU% | distnn CPU% |
+|--------|------------|------------|
+| 1 | 16.9% | 16.5% |
+| 2 | 33.2% | 32.5% |
+| 4 | 67.7% | 64.5% |
+| 8 | 132% | 129% |
+
+The realtime cliff is between 4 and 8 voices for both opcodes, consistent with the ~6-voice ceiling observed in live MIDI testing.
+
+### DSP reference comparison
+
+moogladder (Csound built-in, Huovilainen DAFx 2004, Euler + 2x oversampling) runs at 0.7% CPU per voice and sustains 141 voices at realtime. rkmoog (RK4, 8x oversampling, same algorithm used to generate moognn training data) costs 2.6% per voice and sustains 39 voices. moognn_128u at 16.9% per voice is roughly 24x more expensive than moogladder and 6x more expensive than rkmoog.
+
+### On training smaller models (16u, 8u)
+
+moognn_32u already provides 16 voices at realtime at 5.9% CPU per voice, which covers most musical polyphony requirements. Going below 32u would halve the cost per step but push accuracy well below the -39.7 dB mean of 32u, which is already the weakest point on the frontier. The warmup period-visibility constraint at 100Hz is a hard floor independent of unit count, so accuracy below 32u would be audible at low frequencies without a proportional polyphony benefit. Smaller Moog models are not warranted.
+
+For distortion, smaller models are also not warranted. Distortion is typically a single-voice insert effect and 128u at 16.5% CPU is already appropriate.

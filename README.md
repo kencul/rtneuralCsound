@@ -6,32 +6,46 @@ Research into neural network audio effect modeling using RTNeural, working towar
 
 ```
 ├── audio/
-│   ├── bench_mono.wav                  # Validation audio
-│   ├── testSound_mono.wav              # Training audio
-│   ├── ruin_mono.wav                   # Held-out eval audio (never used in training/validation)
-│   └── filteredOutput/
-│       ├── bench/                      # Moog-filtered outputs for validation
-│       ├── testSound/                  # Moog-filtered outputs for training
-│       └── ruin/                       # Moog-filtered outputs for held-out eval
+│   ├── bench_mono.wav                  # Moog: validation audio
+│   ├── testSound_mono.wav              # Moog: training audio
+│   ├── ruin_mono.wav                   # Moog: held-out eval audio
+│   ├── filteredOutput/
+│   │   ├── bench/                      # Moog-filtered outputs for validation
+│   │   ├── testSound/                  # Moog-filtered outputs for training
+│   │   └── ruin/                       # Moog-filtered outputs for held-out eval
+│   └── updatedDistortion/              # Distortion training/eval pairs (breadboard loopback recordings)
+│       ├── trainingDry.wav / trainingWet.wav
+│       ├── training-10dBDry.wav / training-10dBWet.wav
+│       ├── benchDry.wav / benchWet.wav         # Held-out eval pair
+│       └── bench-10dBDry.wav / bench-10dBWet.wav
 ├── models/                             # Trained model checkpoints by run number
 ├── python/
-│   ├── model_concat.py                 # Knob-concatenation model architecture
+│   ├── model_concat.py                 # Knob-concatenation model architecture (Moog)
 │   ├── model_film.py                   # FiLM conditioning model architecture (pre- and post-GRU)
+│   ├── model_distortion.py             # Non-parametric distortion model architecture
 │   ├── tensor_torch_param.py           # Training script (concat architecture, static data)
 │   ├── tensor_torch_film.py            # Training script (FiLM architecture)
 │   ├── tensor_torch_variable.py        # Training script (concat architecture, static + LFO data)
+│   ├── tensor_torch_distortion.py      # Training script (distortion model)
 │   ├── eval_param_model.py             # Static cutoff evaluation
 │   ├── eval_dynamic.py                 # Dynamic cutoff evaluation (sweep/LFO)
+│   ├── eval_distortion.py              # Distortion model evaluation
+│   ├── eval_asr.py                     # Aliasing-to-Signal Ratio measurement
+│   ├── align_audio.py                  # Dry/wet latency alignment tool
 │   └── compareSpectrum.py              # Spectrogram comparison tool
 ├── src/
 │   ├── moogGen/
 │   │   ├── main.cpp                    # moogGen: static training data generator
 │   │   └── sweep_ref.cpp               # sweep_ref: dynamic cutoff reference generator
 │   └── csound_opcode/
-│       └── moognn.cpp                  # Csound plugin opcode (moognn.dll)
+│       ├── moognn.cpp                  # Csound plugin opcode (moognn.dll)
+│       ├── distnn.cpp                  # Csound plugin opcode (distnn.dll)
+│       └── rkmoog.cpp                  # Csound plugin opcode (rkmoog.dll) - RK4 reference
 ├── csound/
-│   ├── test_passthrough.csd            # File playback through opcode with cutoff sweep
-│   └── test_midi_saw.csd               # Live MIDI with CC-controlled cutoff
+│   ├── test_passthrough.csd            # File playback through moognn with cutoff sweep
+│   ├── test_midi_saw.csd               # Live MIDI with CC-controlled cutoff
+│   ├── test_distnn.csd                 # File playback through distnn with wet/dry sweep
+│   └── test_midi_distnn.csd            # Live MIDI through distnn
 ├── vendor/
 │   ├── RTNeural/                       # Git submodule: real-time neural inference
 │   ├── MoogLadders/                    # Moog ladder filter reference implementations
@@ -213,19 +227,104 @@ The knob is log-normalized to [0, 1] over 100Hz–20kHz. The deployed model is r
 
 ## Csound opcode
 
-Opcode signature: `aout moognn ain, Spath, kcutoff`
+Opcode signature: `aout moognn{N} ain, Spath, kcutoff`
 
+`moognn.dll` registers four size variants. The opcode name must match the GRU hidden size of the model in `Spath`; loading a mismatched JSON segfaults inside RTNeural's loader.
+
+| Opcode | GRU units | Example model |
+|--------|-----------|---------------|
+| `moognn32`  | 32  | `models/25_moog_100-20k_32u/weights.json` |
+| `moognn64`  | 64  | `models/16_moog_100-20k_64u_w256/weights.json` |
+| `moognn128` | 128 | `models/23_moog_variable_128u_w256/weights.json` (deployed) |
+| `moognn256` | 256 | `models/26_moog_100-20k_256u/weights.json` |
+
+Arguments:
 - `ain`: audio input
 - `Spath`: path to the model JSON weights file
 - `kcutoff`: cutoff frequency in Hz (k-rate)
 
-Use `moognn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires.
+`moognn_preload Spath` is shared across all sizes (one JSON cache). Call at score time 0 to pre-cache the weights before the first note fires.
 
-See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples.
+Benchmark (Ryzen 5600X, 48kHz, ksmps=64):
+
+| Opcode | CPU% / voice | Voices at realtime |
+|--------|-------------|-------------------|
+| `moognn32` | 5.9% | 16 |
+| `moognn64` | 8.6% | 11 |
+| `moognn128` | 16.9% | 6 |
+| `moognn256` | 60.0% | 1 |
+
+See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples (both use `moognn128`).
+
+## RK reference opcode
+
+Opcode signature: `aout rkmoog ain, kcutoff, kresonance`
+
+Wraps `RKSimulationMoog` (RK4 integration, 8x oversampling — the same algorithm used to generate moognn training data) as a Csound opcode. Intended for apples-to-apples CPU benchmarking against moognn: identical Csound frame dispatch, k-rate cutoff updates, and MYFLT conversion overhead. No weights file; state resets to zero on note-on.
+
+- `ain`: audio input
+- `kcutoff`: cutoff frequency in Hz (k-rate)
+- `kresonance`: resonance 0–10 (k-rate); 0.5 matches training data
+
+Benchmark (Ryzen 5600X, 48kHz, ksmps=64): 2.6% CPU/voice, 39 voices at realtime. For comparison, `moogladder` (Csound built-in, Huovilainen DAFx 2004) costs 0.7% CPU/voice and sustains 141 voices.
+
+## Distortion opcode
+
+Opcode signature: `aout distnn ain, Spath, kmix`
+
+- `ain`: audio input
+- `Spath`: path to the model JSON weights file
+- `kmix`: wet/dry blend, k-rate (0 = dry, 1 = fully wet)
+
+Deployed model: `models/dist_12_gru128_l1x10/weights.json` (GRU 128 units, breadboard loopback recordings, L1 + MR-STFT loss with L1_WEIGHT=10). Held-out bench ESR: -29.2 dB. ASR mean: -42 dB (aliasing not a significant factor).
+
+Use `distnn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires. See `csound/test_distnn.csd` and `csound/test_midi_distnn.csd` for working examples.
+
+Benchmark (Ryzen 5600X, 48kHz, ksmps=64): 16.5% CPU/voice, 6 voices at realtime — identical cost to `moognn128`. A 256u model (`dist_14_gru256_l1x10`, -30.2 dB held-out) is available for single-voice use at roughly 60% CPU.
+
+## Distortion modeling
+
+Second modeling target: a hardware breadboard diode distortion effect. Unlike the Moog filter, distortion is nonlinear and content-dependent. The architecture is the same Conv1d+GRU+Dense+skip structure but without the knob input channel (`model_distortion.py`).
+
+### Preparing training data
+
+Hardware recordings must be latency-corrected before training. When audio is played through the pedal and recorded back in, the ADC/DAC round-trip of the interface introduces a fixed sample offset between the dry and wet files. Use `align_audio.py` to measure and correct this:
+
+```bash
+# Measure the lag (no --save: report only)
+python python/align_audio.py <dry> <wet>
+
+# Write corrected wet file (overwrites target path)
+python python/align_audio.py <dry> <wet> --save <output_wet_path>
+
+# Resample both to 48kHz before aligning (for recordings captured at a different rate)
+python python/align_audio.py <dry> <wet> --sr 48000 --save <output_wet_path>
+```
+
+The script uses cross-correlation on the first 5 seconds to find the lag. If wet is delayed (positive lag), it trims the start of wet. If wet is early (negative lag), it prepends silence. Dry is never modified. The offset is fixed for a given interface configuration, so measure once per session and apply to all pairs from that session.
+
+### Training
+
+```bash
+python python/tensor_torch_distortion.py models/dist_my_run [gru_hidden] [l1_weight]
+```
+
+`l1_weight` scales the time-domain L1 term relative to the MR-STFT term (default 1.0). Without this weighting, large models exploit the phase-agnostic nature of MR-STFT and converge to spectrally plausible but waveform-incoherent solutions. A value of 10 was found to fix this for 128u and 256u models; 64u models do not need it (limited capacity provides implicit regularization). Setting `l1_weight > 1.0` automatically lowers LR, clip norm, and scheduler patience to compensate for the increased gradient scale.
+
+Dry/wet paths are set near the top of the script. Training on diverse audio sources is important: a diode clipper's output depends on the instantaneous waveform, so a model trained on one audio source does not generalize to audio with different frequency content or dynamics. See DEVLOG2.md for the full experiment history.
+
+### Evaluation
+
+```bash
+python python/eval_distortion.py <model.pt> [warmup] [--dry <path>] [--wet <path>] [--save <dir>] [--show]
+```
 
 ## Next steps
 
-- Paper: Csound conference writeup
+- **Paper**: Csound conference writeup
+- Moog: extend LFO training range to 20kHz and retrain LFO-only model (run 24 collapses above 10kHz due to the sweep ceiling); consider mixing with static high-frequency windows to anchor the model above the LFO range
+- ~~Update `distnn` opcode to deploy `dist_12_gru128_l1x10` weights~~ -- done
+- ~~Run full benchmark matrix (`bench/run_benchmarks.py`) and generate paper figures~~ -- done; see `bench/results/`
 - ~~Variable-parameter training data~~ -- complete (run 23); +10 dB on fast LFO
 - ~~FiLM conditioning experiment~~ -- complete (runs 21-22); pre-GRU FiLM matched concat statically but did not improve dynamic tracking
 - ~~Csound opcode implementation~~ -- done, see `src/csound_opcode/`

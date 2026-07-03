@@ -1,0 +1,25 @@
+Model: models/dist_09_gru128/best_model.pt  (GRU 128u)
+Device: cuda
+
+[500 Hz]
+  ASR: -42.2 dB
+[1000 Hz]
+  ASR: -43.1 dB
+[2000 Hz]
+  ASR: -43.5 dB
+[4000 Hz]
+  ASR: -42.0 dB
+[8000 Hz]
+  ASR: -31.6 dB
+
+Test freq (Hz)     ASR (dB)
+----------------------------
+500                   -42.2
+1000                  -43.1
+2000                  -43.5
+4000                  -42.0
+8000                  -31.6
+----------------------------
+mean                  -40.5
+  Saved models/dist_09_gru128/eval\asr_spectra.png
+Saved models/dist_09_gru128/eval\asr_summary.txt

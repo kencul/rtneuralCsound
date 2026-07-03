@@ -1,0 +1,9 @@
+model: models/dist_08_gru128/best_model.pt
+cell:  GRU 128u
+
+Pair           Split        ESR (dB)
+------------------------------------
+bench          held-out          1.1
+bench-10dB     held-out          1.4
+giga           train           -12.1
+giga-10dB      train            -9.9
