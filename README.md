@@ -245,7 +245,16 @@ Arguments:
 
 `moognn_preload Spath` is shared across all sizes (one JSON cache). Call at score time 0 to pre-cache the weights before the first note fires.
 
-Polyphony scales inversely with size: 128u handles ~6 voices in real time, 256u about 2. Final numbers are pending the formal benchmark in `bench/`. See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples (both use `moognn128`).
+Benchmark (Ryzen 5600X, 48kHz, ksmps=64):
+
+| Opcode | CPU% / voice | Voices at realtime |
+|--------|-------------|-------------------|
+| `moognn32` | 5.9% | 16 |
+| `moognn64` | 8.6% | 11 |
+| `moognn128` | 16.9% | 6 |
+| `moognn256` | 60.0% | 1 |
+
+See `csound/test_passthrough.csd` and `csound/test_midi_saw.csd` for working examples (both use `moognn128`).
 
 ## RK reference opcode
 
@@ -257,7 +266,7 @@ Wraps `RKSimulationMoog` (RK4 integration, 8x oversampling — the same algorith
 - `kcutoff`: cutoff frequency in Hz (k-rate)
 - `kresonance`: resonance 0–10 (k-rate); 0.5 matches training data
 
-Preliminary benchmark (Ryzen 5600X, 48 kHz, ksmps=64): ~4% CPU/voice, ~25 voices at realtime. Full numbers pending the formal benchmark run.
+Benchmark (Ryzen 5600X, 48kHz, ksmps=64): 2.6% CPU/voice, 39 voices at realtime. For comparison, `moogladder` (Csound built-in, Huovilainen DAFx 2004) costs 0.7% CPU/voice and sustains 141 voices.
 
 ## Distortion opcode
 
@@ -271,7 +280,7 @@ Deployed model: `models/dist_12_gru128_l1x10/weights.json` (GRU 128 units, bread
 
 Use `distnn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires. See `csound/test_distnn.csd` and `csound/test_midi_distnn.csd` for working examples.
 
-Polyphony ceiling is approximately 6 voices at 128 units (same GRU cost as moognn128). A 256u model (`dist_14_gru256_l1x10`, -30.2 dB) trades 1 dB of accuracy for a roughly 1-2 voice ceiling.
+Benchmark (Ryzen 5600X, 48kHz, ksmps=64): 16.5% CPU/voice, 6 voices at realtime — identical cost to `moognn128`. A 256u model (`dist_14_gru256_l1x10`, -30.2 dB held-out) is available for single-voice use at roughly 60% CPU.
 
 ## Distortion modeling
 

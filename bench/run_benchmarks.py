@@ -30,7 +30,7 @@ MODELS = {
     "moognn_64u":  "models/16_moog_100-20k_64u_w256/weights.json",
     "moognn_128u": "models/19_moog_100-20k_128u_w256/weights.json",
     "moognn_256u": "models/26_moog_100-20k_256u/weights.json",
-    "distnn_128u": "models/dist_07_gru128_mrstft/weights.json",
+    "distnn_128u": "models/dist_12_gru128_l1x10/weights.json",
 }
 
 # Each moognn label maps to a size-specific opcode name registered in

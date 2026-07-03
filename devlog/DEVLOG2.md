@@ -1517,4 +1517,45 @@ Same config as dist_12 (L1_WEIGHT=10, LR=1e-4, clip=0.3, scheduler patience=10).
 
 The practical tradeoff: in the Moog filter experiments 256u crackled at 2 voices; the distortion opcode has the same per-sample GRU cost. dist_14 is likely a single-voice model. dist_12 at 128u gives 6-voice polyphony for 1 dB less accuracy. Whether that tradeoff is acceptable depends on the use case.
 
-The LR scheduler still steps too late due to slow val_loss progress at 1e-4. A retrain with more aggressive patience or a cosine annealing schedule would likely extract additional accuracy from both 128u and 256u without changing the architecture.
+The LR scheduler still steps too late due to slow val_loss progress at 1e-4. A retrain with more aggressive patience would likely extract additional accuracy from both 128u and 256u without changing the architecture.
+
+---
+
+## Benchmark results (Ryzen 5600X, 48kHz, ksmps=64, Release build)
+
+Full matrix run via `bench/run_benchmarks.py`. Raw data at `bench/results/opcode.csv`.
+
+### Single-voice CPU cost
+
+| Model | CPU% / voice | Voices at realtime |
+|-------|-------------|-------------------|
+| moognn_32u | 5.9% | 16 |
+| moognn_64u | 8.6% | 11 |
+| moognn_128u | 16.9% | 6 |
+| moognn_256u | 60.0% | 1 |
+| distnn_128u | 16.5% | 6 |
+| rkmoog (RK4 reference) | 2.6% | 39 |
+| moogladder (Csound built-in) | 0.7% | 141 |
+
+moognn_128u and distnn_128u cost the same to within 0.4 percentage points. The GRU input difference (17 channels for moognn vs 16 for distnn) is negligible at 128 hidden units, as expected.
+
+### moognn_128u and distnn_128u polyphony
+
+| Voices | moognn CPU% | distnn CPU% |
+|--------|------------|------------|
+| 1 | 16.9% | 16.5% |
+| 2 | 33.2% | 32.5% |
+| 4 | 67.7% | 64.5% |
+| 8 | 132% | 129% |
+
+The realtime cliff is between 4 and 8 voices for both opcodes, consistent with the ~6-voice ceiling observed in live MIDI testing.
+
+### DSP reference comparison
+
+moogladder (Csound built-in, Huovilainen DAFx 2004, Euler + 2x oversampling) runs at 0.7% CPU per voice and sustains 141 voices at realtime. rkmoog (RK4, 8x oversampling, same algorithm used to generate moognn training data) costs 2.6% per voice and sustains 39 voices. moognn_128u at 16.9% per voice is roughly 24x more expensive than moogladder and 6x more expensive than rkmoog.
+
+### On training smaller models (16u, 8u)
+
+moognn_32u already provides 16 voices at realtime at 5.9% CPU per voice, which covers most musical polyphony requirements. Going below 32u would halve the cost per step but push accuracy well below the -39.7 dB mean of 32u, which is already the weakest point on the frontier. The warmup period-visibility constraint at 100Hz is a hard floor independent of unit count, so accuracy below 32u would be audible at low frequencies without a proportional polyphony benefit. Smaller Moog models are not warranted.
+
+For distortion, smaller models are also not warranted. Distortion is typically a single-voice insert effect and 128u at 16.5% CPU is already appropriate.

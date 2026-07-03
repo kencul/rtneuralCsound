@@ -11,9 +11,9 @@ nchnls = 1
 0dbfs = 1
 
 instr 1
-  ain   diskin "audio/distortionBench.wav", 1
+  ain   diskin "audio/updatedDistortion/benchDry.wav", 1
   kmix  = linseg:k(0, 15, 1)   ; ramp dry to wet, then hold wet
-  aout  distnn ain, "models/dist_07_gru128_mrstft/weights.json", kmix
+  aout  distnn ain, "models/dist_12_gru128_l1x10/weights.json", kmix
         out aout
 endin
 </CsInstruments>
@@ -21,3 +21,4 @@ endin
 i 1 0 500
 </CsScore>
 </CsoundSynthesizer>
+mark
