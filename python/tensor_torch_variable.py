@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 if len(sys.argv) != 2:
     print(f"Usage: {sys.argv[0]} <output_dir>")
-    print(f"  e.g. {sys.argv[0]} models/23_moog_variable_128u_w256")
+    print(f"  e.g. {sys.argv[0]} models/27_moog_variable_allrates_128u_w256")
     sys.exit(1)
 
 OUT_DIR = sys.argv[1]
@@ -39,19 +39,19 @@ CUTOFF_FREQS = [100, 125, 250, 500, 800, 1000, 2000, 4000, 8000, 12000, 16000, 2
 
 # Variable-cutoff training files: (dry, wet, csv)
 VARIABLE_TRAIN_FILES = [
-    (
-        "audio/testSound_mono.wav",
-        "audio/filteredOutput/testSound/testSound_mono_lfo_fast_100-10khz.wav",
-        "audio/filteredOutput/testSound/testSound_mono_lfo_fast_100-10khz.csv",
-    ),
+    ("audio/testSound_mono.wav", "audio/filteredOutput/testSound/testSound_mono_lfo_1hz_100-10khz.wav",  "audio/filteredOutput/testSound/testSound_mono_lfo_1hz_100-10khz.csv"),
+    ("audio/testSound_mono.wav", "audio/filteredOutput/testSound/testSound_mono_lfo_2hz_100-10khz.wav",  "audio/filteredOutput/testSound/testSound_mono_lfo_2hz_100-10khz.csv"),
+    ("audio/testSound_mono.wav", "audio/filteredOutput/testSound/testSound_mono_lfo_fast_100-10khz.wav", "audio/filteredOutput/testSound/testSound_mono_lfo_fast_100-10khz.csv"),
+    ("audio/testSound_mono.wav", "audio/filteredOutput/testSound/testSound_mono_lfo_10hz_100-10khz.wav", "audio/filteredOutput/testSound/testSound_mono_lfo_10hz_100-10khz.csv"),
+    ("audio/testSound_mono.wav", "audio/filteredOutput/testSound/testSound_mono_lfo_20hz_100-10khz.wav", "audio/filteredOutput/testSound/testSound_mono_lfo_20hz_100-10khz.csv"),
 ]
 
 VARIABLE_VAL_FILES = [
-    (
-        "audio/bench_mono.wav",
-        "audio/filteredOutput/bench/bench_mono_lfo_fast_100-10khz.wav",
-        "audio/filteredOutput/bench/bench_mono_lfo_fast_100-10khz.csv",
-    ),
+    ("audio/bench_mono.wav", "audio/filteredOutput/bench/bench_mono_lfo_1hz_100-10khz.wav",  "audio/filteredOutput/bench/bench_mono_lfo_1hz_100-10khz.csv"),
+    ("audio/bench_mono.wav", "audio/filteredOutput/bench/bench_mono_lfo_2hz_100-10khz.wav",  "audio/filteredOutput/bench/bench_mono_lfo_2hz_100-10khz.csv"),
+    ("audio/bench_mono.wav", "audio/filteredOutput/bench/bench_mono_lfo_fast_100-10khz.wav", "audio/filteredOutput/bench/bench_mono_lfo_fast_100-10khz.csv"),
+    ("audio/bench_mono.wav", "audio/filteredOutput/bench/bench_mono_lfo_10hz_100-10khz.wav", "audio/filteredOutput/bench/bench_mono_lfo_10hz_100-10khz.csv"),
+    ("audio/bench_mono.wav", "audio/filteredOutput/bench/bench_mono_lfo_20hz_100-10khz.wav", "audio/filteredOutput/bench/bench_mono_lfo_20hz_100-10khz.csv"),
 ]
 
 

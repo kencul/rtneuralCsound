@@ -13,7 +13,7 @@ nchnls = 1
 instr 1
   ain   diskin "audio/bench_mono.wav", 1
   klin = linseg:k(50, 2.5, 5000, 2.5, 50)
-  aout  moognn128 ain, "models/19_moog_100-20k_128u_w256/weights.json", klin
+  aout  moognn128 ain, "models/27_moog_variable_allrates_128u_w256/weights.json", klin
         out aout
 endin
 </CsInstruments>
