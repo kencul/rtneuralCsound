@@ -9,23 +9,15 @@ Research into neural network audio effect modeling using RTNeural, working towar
 │   ├── bench_mono.wav                  # Moog: validation audio
 │   ├── testSound_mono.wav              # Moog: training audio
 │   ├── ruin_mono.wav                   # Moog: held-out eval audio
-│   ├── distortionTestSound_mono.wav    # Distortion: training audio (dry)
-│   ├── distortionGigaTestAudio.wav     # Distortion: large training audio (dry)
-│   ├── distortionGigaTestAudio-10dB.wav
 │   ├── filteredOutput/
 │   │   ├── bench/                      # Moog-filtered outputs for validation
 │   │   ├── testSound/                  # Moog-filtered outputs for training
 │   │   └── ruin/                       # Moog-filtered outputs for held-out eval
-│   ├── distortionBench.wav             # Distortion: bench audio (dry)
-│   ├── distortionBench-10dB.wav
-│   └── distortionOutput/
-│       ├── benchOutput.wav             # Distortion: hardware-processed bench (validation)
-│       ├── distortionTestSoundOutput.wav
-│       ├── ruinOutput.wav
-│       ├── distortionGigaTestOutput.wav     # Latency-corrected, 48kHz
-│       ├── distortionGigaTestOutput-10dB.wav
-│       ├── distortionBenchOutput.wav        # Latency-corrected, 48kHz
-│       └── distortionBenchOutput-10dB.wav
+│   └── updatedDistortion/              # Distortion training/eval pairs (breadboard loopback recordings)
+│       ├── trainingDry.wav / trainingWet.wav
+│       ├── training-10dBDry.wav / training-10dBWet.wav
+│       ├── benchDry.wav / benchWet.wav         # Held-out eval pair
+│       └── bench-10dBDry.wav / bench-10dBWet.wav
 ├── models/                             # Trained model checkpoints by run number
 ├── python/
 │   ├── model_concat.py                 # Knob-concatenation model architecture (Moog)
@@ -38,6 +30,7 @@ Research into neural network audio effect modeling using RTNeural, working towar
 │   ├── eval_param_model.py             # Static cutoff evaluation
 │   ├── eval_dynamic.py                 # Dynamic cutoff evaluation (sweep/LFO)
 │   ├── eval_distortion.py              # Distortion model evaluation
+│   ├── eval_asr.py                     # Aliasing-to-Signal Ratio measurement
 │   ├── align_audio.py                  # Dry/wet latency alignment tool
 │   └── compareSpectrum.py              # Spectrogram comparison tool
 ├── src/
@@ -49,9 +42,10 @@ Research into neural network audio effect modeling using RTNeural, working towar
 │       ├── distnn.cpp                  # Csound plugin opcode (distnn.dll)
 │       └── rkmoog.cpp                  # Csound plugin opcode (rkmoog.dll) - RK4 reference
 ├── csound/
-│   ├── test_passthrough.csd            # File playback through opcode with cutoff sweep
+│   ├── test_passthrough.csd            # File playback through moognn with cutoff sweep
 │   ├── test_midi_saw.csd               # Live MIDI with CC-controlled cutoff
-│   └── test_distnn.csd                 # File playback through distnn with wet/dry sweep
+│   ├── test_distnn.csd                 # File playback through distnn with wet/dry sweep
+│   └── test_midi_distnn.csd            # Live MIDI through distnn
 ├── vendor/
 │   ├── RTNeural/                       # Git submodule: real-time neural inference
 │   ├── MoogLadders/                    # Moog ladder filter reference implementations
@@ -273,11 +267,11 @@ Opcode signature: `aout distnn ain, Spath, kmix`
 - `Spath`: path to the model JSON weights file
 - `kmix`: wet/dry blend, k-rate (0 = dry, 1 = fully wet)
 
-Deployed model: `models/dist_07_gru128_mrstft/weights.json` (GRU 128 units, trained on `distortionGigaTestAudio` with L1 + multi-resolution STFT loss per Comunita et al. ICASSP 2023).
+Deployed model: `models/dist_12_gru128_l1x10/weights.json` (GRU 128 units, breadboard loopback recordings, L1 + MR-STFT loss with L1_WEIGHT=10). Held-out bench ESR: -29.2 dB. ASR mean: -42 dB (aliasing not a significant factor).
 
-Use `distnn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires. See `csound/test_distnn.csd` for a working example.
+Use `distnn_preload Spath` at score time 0 to pre-cache the JSON before the first note fires. See `csound/test_distnn.csd` and `csound/test_midi_distnn.csd` for working examples.
 
-**Caveats:** held-out ESR is positive (+1.1 dB on bench), so the model does not reproduce the exact waveform on unseen audio, but the spectrogram character matches closely and aliasing is low (ASR around -43 dB from 500 Hz to 4 kHz, -40 dB at 8 kHz). Polyphony ceiling is ~6 voices (same GRU size as the deployed Moog model).
+Polyphony ceiling is approximately 6 voices at 128 units (same GRU cost as moognn128). A 256u model (`dist_14_gru256_l1x10`, -30.2 dB) trades 1 dB of accuracy for a roughly 1-2 voice ceiling.
 
 ## Distortion modeling
 
@@ -303,8 +297,10 @@ The script uses cross-correlation on the first 5 seconds to find the lag. If wet
 ### Training
 
 ```bash
-python python/tensor_torch_distortion.py models/dist_my_run
+python python/tensor_torch_distortion.py models/dist_my_run [gru_hidden] [l1_weight]
 ```
+
+`l1_weight` scales the time-domain L1 term relative to the MR-STFT term (default 1.0). Without this weighting, large models exploit the phase-agnostic nature of MR-STFT and converge to spectrally plausible but waveform-incoherent solutions. A value of 10 was found to fix this for 128u and 256u models; 64u models do not need it (limited capacity provides implicit regularization). Setting `l1_weight > 1.0` automatically lowers LR, clip norm, and scheduler patience to compensate for the increased gradient scale.
 
 Dry/wet paths are set near the top of the script. Training on diverse audio sources is important: a diode clipper's output depends on the instantaneous waveform, so a model trained on one audio source does not generalize to audio with different frequency content or dynamics. See DEVLOG2.md for the full experiment history.
 
@@ -316,7 +312,8 @@ python python/eval_distortion.py <model.pt> [warmup] [--dry <path>] [--wet <path
 
 ## Next steps
 
-- Host training audio externally (Google Drive / Dropbox) — distortion source files (`distortionGigaTestAudio`, `distortionBench`, `distortionOutput/`) are excluded from the repo via `.gitignore` due to size
+- Update `distnn` opcode to deploy `dist_12_gru128_l1x10` weights (currently still pointing at dist_07)
+- Run full benchmark matrix (`bench/run_benchmarks.py`) and generate paper figures
 - Paper: Csound conference writeup
 - ~~Variable-parameter training data~~ -- complete (run 23); +10 dB on fast LFO
 - ~~FiLM conditioning experiment~~ -- complete (runs 21-22); pre-GRU FiLM matched concat statically but did not improve dynamic tracking

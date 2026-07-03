@@ -1501,3 +1501,20 @@ dist_12 (128u, L1x10) is the clear winner at -29.2 dB held-out, 3 dB above the p
 dist_13 (64u, L1x10) is nearly identical to dist_11 (64u, no L1 weighting): -26.2 vs -25.7 dB on bench, -22.8 vs -22.7 dB on training. The L1 weighting had almost no effect on the smaller model, confirming that its limited capacity was already acting as implicit regularization. The 128u improvement came entirely from capacity that could now be used correctly.
 
 dist_12_gru128_l1x10 is the new primary distortion model. The distnn opcode should be updated to deploy these weights.
+
+---
+
+## Run dist_14 (256 GRU units, L1x10)
+
+Same config as dist_12 (L1_WEIGHT=10, LR=1e-4, clip=0.3, scheduler patience=10). Trained all 300 epochs with no early stopping. LR stepped once from 1e-4 to 5e-5 at epoch 292, meaning the scheduler still fires too late. ~84 seconds per epoch, approximately 7 hours total.
+
+| Model | GRU | bench held-out | bench-10dB | train |
+|-------|-----|---------------|------------|-------|
+| dist_12_gru128_l1x10 | 128u | -29.2 | -28.2 | -26.6 |
+| dist_14_gru256_l1x10 | 256u | -30.2 | -29.2 | -28.2 |
+
+256u beats 128u by 1 dB on held-out bench. Diminishing returns have set in: each unit doubling is now worth roughly 1 dB rather than the 3-4 dB gains seen in the 64u to 128u step. Generalization remains healthy across both models, with held-out matching or exceeding training ESR.
+
+The practical tradeoff: in the Moog filter experiments 256u crackled at 2 voices; the distortion opcode has the same per-sample GRU cost. dist_14 is likely a single-voice model. dist_12 at 128u gives 6-voice polyphony for 1 dB less accuracy. Whether that tradeoff is acceptable depends on the use case.
+
+The LR scheduler still steps too late due to slow val_loss progress at 1e-4. A retrain with more aggressive patience or a cosine annealing schedule would likely extract additional accuracy from both 128u and 256u without changing the architecture.
