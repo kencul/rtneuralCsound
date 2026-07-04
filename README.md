@@ -136,7 +136,7 @@ python python/tensor_torch_film.py models/my_run
 
 Architecture and hyperparameters (`GRU_HIDDEN`, `warmup_size`, `CUTOFF_FREQS`) are set at the top of each training script. Checkpoints embed `arch`, `gru_hidden`, `freq_min`, and `freq_max` so eval scripts auto-detect the model configuration.
 
-`tensor_torch_variable.py` trains on static cutoffs from `testSound` plus LFO-swept targets from `testSound` and validates against static bench cutoffs plus the bench 5Hz LFO. Additional LFO rates can be added to `VARIABLE_TRAIN_FILES` or `VARIABLE_VAL_FILES`.
+`tensor_torch_variable.py` trains on static cutoffs from `testSound` plus LFO-swept targets from `testSound` at all five rates (1, 2, 5, 10, 20 Hz), and validates against static bench cutoffs plus the same five bench LFO rates. Additional LFO rates can be added to `VARIABLE_TRAIN_FILES` or `VARIABLE_VAL_FILES`.
 
 ## Evaluation
 
@@ -223,7 +223,7 @@ Dense ────────+──> Output
 
 Pre-GRU FiLM (run 22) matched concat at the same unit count statically but did not improve dynamic tracking under fast modulation. Post-GRU FiLM (run 21) failed to learn. Concat remains the architecture of record.
 
-The knob is log-normalized to [0, 1] over 100Hz–20kHz. The deployed model is run 23 (`model_concat`, 128 GRU units, 256-sample warmup, variable training data). See [devlog/DEVLOG2.md](devlog/DEVLOG2.md) for the full experiment history.
+The knob is log-normalized to [0, 1] over 100Hz–20kHz. The deployed model is run 27 (`model_concat`, 128 GRU units, 256-sample warmup, static + all-rate LFO variable training data). See [devlog/DEVLOG2.md](devlog/DEVLOG2.md) for the full experiment history.
 
 ## Csound opcode
 
@@ -235,7 +235,7 @@ Opcode signature: `aout moognn{N} ain, Spath, kcutoff`
 |--------|-----------|---------------|
 | `moognn32`  | 32  | `models/25_moog_100-20k_32u/weights.json` |
 | `moognn64`  | 64  | `models/16_moog_100-20k_64u_w256/weights.json` |
-| `moognn128` | 128 | `models/23_moog_variable_128u_w256/weights.json` (deployed) |
+| `moognn128` | 128 | `models/27_moog_variable_allrates_128u_w256/weights.json` (deployed) |
 | `moognn256` | 256 | `models/26_moog_100-20k_256u/weights.json` |
 
 Arguments:
@@ -322,10 +322,9 @@ python python/eval_distortion.py <model.pt> [warmup] [--dry <path>] [--wet <path
 ## Next steps
 
 - **Paper**: Csound conference writeup
-- Moog: extend LFO training range to 20kHz and retrain LFO-only model (run 24 collapses above 10kHz due to the sweep ceiling); consider mixing with static high-frequency windows to anchor the model above the LFO range
 - ~~Update `distnn` opcode to deploy `dist_12_gru128_l1x10` weights~~ -- done
 - ~~Run full benchmark matrix (`bench/run_benchmarks.py`) and generate paper figures~~ -- done; see `bench/results/`
-- ~~Variable-parameter training data~~ -- complete (run 23); +10 dB on fast LFO
+- ~~Variable-parameter training data~~ -- complete (run 27); all-rate LFO training eliminates rate sensitivity, +8-11 dB on fast modulation vs run 23
 - ~~FiLM conditioning experiment~~ -- complete (runs 21-22); pre-GRU FiLM matched concat statically but did not improve dynamic tracking
 - ~~Csound opcode implementation~~ -- done, see `src/csound_opcode/`
 - ~~Architecture sweet spot -- 64 GRU units with `knob_to_h0`~~ -- trained (run 14), ablation complete
